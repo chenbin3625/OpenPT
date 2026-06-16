@@ -219,7 +219,6 @@ func (s *Scheduler) removeActive(hash [20]byte) *announcer {
 }
 
 func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Event, delay time.Duration) {
-	const maxFailures = 10 // 最大失败次数限制
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	for {
@@ -237,17 +236,6 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 			a.failures++
 			delay := backoffDelay(a.failures, cfg.TrackerFailureBackoffMin(), cfg.TrackerFailureBackoffMax())
 			s.log.Warn("announce failed", "event", eventName(event), "name", a.torrent.Name, "failures", a.failures, "retry_in", delay, "error", err)
-
-			// 达到最大失败次数，停止该种子
-			if a.failures >= maxFailures {
-				s.log.Warn("max failures reached; stopping torrent", "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex(), "failures", a.failures)
-				s.markCompleted(a.torrent.InfoHash)
-				s.bw.Unregister(a.torrent.InfoHashHex())
-				s.removeActive(a.torrent.InfoHash)
-				s.fillSlots(a.fillContext(ctx))
-				return
-			}
-
 			timer.Reset(delay)
 			continue
 		} else {
