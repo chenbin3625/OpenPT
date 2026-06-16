@@ -32,6 +32,7 @@ func NextAfter(event clientemu.Event, interval time.Duration, err error) Result 
 }
 
 type Scheduler struct {
+	cfgMu   sync.RWMutex
 	cfg     config.Config
 	client  *clientemu.Client
 	tracker *tracker.Client
@@ -49,6 +50,7 @@ type announcer struct {
 	lastInterval time.Duration
 	failures     int
 	started      bool
+	parent       context.Context
 	cancel       context.CancelFunc
 }
 
@@ -60,9 +62,7 @@ func New(cfg config.Config, emu *clientemu.Client, tc *tracker.Client, bw *bandw
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
-	for _, t := range s.store.List() {
-		s.tryAdd(ctx, t)
-	}
+	s.fillSlots(ctx)
 	go func() {
 		for {
 			select {
@@ -71,9 +71,10 @@ func (s *Scheduler) Start(ctx context.Context) {
 			case ev := <-s.store.Events():
 				switch ev.Type {
 				case store.Added:
-					s.tryAdd(ctx, ev.Torrent)
+					s.fillSlots(ctx)
 				case store.Removed:
 					s.stopTorrent(ev.Torrent.InfoHash)
+					s.fillSlots(ctx)
 				}
 			}
 		}
@@ -108,29 +109,79 @@ func (s *Scheduler) Stop(ctx context.Context) {
 	}
 }
 
-func (s *Scheduler) tryAdd(parent context.Context, t *torrent.Torrent) {
+func (s *Scheduler) UpdateConfig(cfg config.Config) {
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	s.cfg = cfg
+}
+
+func (s *Scheduler) FillSlots(ctx context.Context) {
+	s.fillSlots(ctx)
+}
+
+func (s *Scheduler) config() config.Config {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.cfg
+}
+
+func (s *Scheduler) fillSlots(parent context.Context) {
+	for parent.Err() == nil {
+		cfg := s.config()
+		s.mu.Lock()
+		if len(s.active) >= cfg.SimultaneousSeed {
+			s.mu.Unlock()
+			return
+		}
+		active := make(map[[20]byte]bool, len(s.active))
+		for hash := range s.active {
+			active[hash] = true
+		}
+		s.mu.Unlock()
+		t, err := s.store.PickNotIn(active)
+		if err != nil {
+			return
+		}
+		s.tryAdd(parent, t)
+	}
+}
+
+func (s *Scheduler) tryAdd(parent context.Context, t *torrent.Torrent) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.active[t.InfoHash]; ok || len(s.active) >= s.cfg.SimultaneousSeed {
-		return
+	cfg := s.config()
+	if _, ok := s.active[t.InfoHash]; ok || len(s.active) >= cfg.SimultaneousSeed {
+		return false
 	}
 	ctx, cancel := context.WithCancel(parent)
-	a := &announcer{torrent: t, lastInterval: 5 * time.Second, cancel: cancel}
+	a := &announcer{torrent: t, lastInterval: 5 * time.Second, parent: parent, cancel: cancel}
 	s.active[t.InfoHash] = a
 	s.log.Info("torrent scheduled", "name", t.Name, "info_hash", t.InfoHashHex())
 	go s.loop(ctx, a, clientemu.EventStarted, 0)
+	return true
 }
 
 func (s *Scheduler) stopTorrent(hash [20]byte) {
+	a := s.removeActive(hash)
+	if a != nil {
+		s.bw.Unregister(a.torrent.InfoHashHex())
+	}
+	if a != nil && a.started {
+		go s.announce(context.Background(), a, clientemu.EventStopped)
+	}
+}
+
+func (s *Scheduler) removeActive(hash [20]byte) *announcer {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	a := s.active[hash]
 	if a != nil && a.cancel != nil {
 		a.cancel()
 	}
-	s.mu.Unlock()
-	if a != nil && a.started {
-		go s.announce(context.Background(), a, clientemu.EventStopped)
+	if a != nil {
+		delete(s.active, hash)
 	}
+	return a
 }
 
 func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Event, delay time.Duration) {
@@ -143,18 +194,21 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 		case <-timer.C:
 		}
 		resp, err := s.announce(ctx, a, event)
+		cfg := s.config()
 		if err != nil {
-			a.failures++
-			s.log.Warn("announce failed", "event", eventName(event), "name", a.torrent.Name, "failures", a.failures, "error", err)
-			if a.failures >= s.cfg.MaxConsecutiveFailures {
-				s.log.Warn("max consecutive failures reached; archiving torrent", "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex())
-				s.bw.Unregister(a.torrent.InfoHashHex())
-				s.store.ArchiveByHash(a.torrent.InfoHash, "max consecutive announce failures")
-				s.mu.Lock()
-				delete(s.active, a.torrent.InfoHash)
-				s.mu.Unlock()
+			if ctx.Err() != nil {
 				return
 			}
+			a.failures++
+			delay := backoffDelay(a.failures, cfg.TrackerFailureBackoffMin(), cfg.TrackerFailureBackoffMax())
+			s.log.Warn("announce failed", "event", eventName(event), "name", a.torrent.Name, "failures", a.failures, "retry_in", delay, "error", err)
+			if a.failures >= cfg.MaxConsecutiveFailures {
+				s.log.Warn("max consecutive failures reached; archiving torrent", "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex())
+				s.archiveTorrent(ctx, a, "max consecutive announce failures")
+				return
+			}
+			timer.Reset(delay)
+			continue
 		} else {
 			a.failures = 0
 			if resp.Interval > 0 {
@@ -164,16 +218,23 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 				a.started = true
 				s.bw.Register(a.torrent.InfoHashHex())
 			}
+			s.bw.UpdatePeers(a.torrent.InfoHashHex(), resp.Seeders, resp.Leechers)
 			if event == clientemu.EventStopped {
 				s.bw.Unregister(a.torrent.InfoHashHex())
-				s.mu.Lock()
-				delete(s.active, a.torrent.InfoHash)
-				s.mu.Unlock()
+				s.removeActive(a.torrent.InfoHash)
+				s.fillSlots(a.fillContext(ctx))
 				return
 			}
-			if !s.cfg.KeepTorrentWithZeroLeechers && resp.Leechers < 1 {
-				s.log.Info("archiving torrent with zero leechers", "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex())
-				s.store.ArchiveByHash(a.torrent.InfoHash, "tracker reported zero leechers")
+			if ratioReached(cfg.Uploaded.RatioTarget, a.torrent.Size, s.bw.Get(a.torrent.InfoHashHex()).Uploaded) {
+				s.completeTorrent(ctx, a, cfg.Uploaded.RatioTarget)
+				return
+			}
+			if !cfg.KeepTorrentWithZeroLeechers && (resp.Seeders < 1 || resp.Leechers < 1) {
+				s.log.Info("archiving torrent with no peers", "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex(), "seeders", resp.Seeders, "leechers", resp.Leechers)
+				if _, err := s.announce(ctx, a, clientemu.EventStopped); err != nil {
+					s.log.Warn("failed to send stopped announce after no peers", "name", a.torrent.Name, "error", err)
+				}
+				s.archiveTorrent(ctx, a, "tracker reported zero seeders or leechers")
 				return
 			}
 		}
@@ -183,6 +244,7 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 }
 
 func (s *Scheduler) announce(ctx context.Context, a *announcer, event clientemu.Event) (tracker.Response, error) {
+	cfg := s.config()
 	stats := s.bw.Get(a.torrent.InfoHashHex())
 	query, err := s.client.RenderQuery(clientemu.RenderInput{
 		InfoHash:   a.torrent.InfoHashBytes(),
@@ -190,10 +252,10 @@ func (s *Scheduler) announce(ctx context.Context, a *announcer, event clientemu.
 		Uploaded:   stats.Uploaded,
 		Downloaded: stats.Downloaded,
 		Left:       stats.Left,
-		Port:       s.cfg.Announce.Port,
+		Port:       cfg.Announce.Port,
 		Event:      event,
-		IP:         s.cfg.Announce.IP,
-		IPv6:       s.cfg.Announce.IPv6,
+		IP:         cfg.Announce.IP,
+		IPv6:       cfg.Announce.IPv6,
 	})
 	if err != nil {
 		return tracker.Response{}, err
@@ -207,6 +269,58 @@ func (s *Scheduler) announce(ctx context.Context, a *announcer, event clientemu.
 	}
 	s.log.Info("tracker response", "event", eventName(event), "interval", resp.Interval, "seeders", resp.Seeders, "leechers", resp.Leechers, "name", a.torrent.Name)
 	return resp, nil
+}
+
+func (s *Scheduler) ActiveCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.active)
+}
+
+func (s *Scheduler) completeTorrent(ctx context.Context, a *announcer, ratioTarget float64) {
+	s.log.Info("ratio target reached; completing torrent", "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex(), "ratio_target", ratioTarget)
+	if _, err := s.announce(ctx, a, clientemu.EventStopped); err != nil {
+		s.log.Warn("failed to send stopped announce after ratio target", "name", a.torrent.Name, "error", err)
+	}
+	s.archiveTorrent(ctx, a, "ratio target reached")
+}
+
+func (s *Scheduler) archiveTorrent(ctx context.Context, a *announcer, reason string) {
+	s.bw.Unregister(a.torrent.InfoHashHex())
+	s.removeActive(a.torrent.InfoHash)
+	s.store.ArchiveByHash(a.torrent.InfoHash, reason)
+	s.fillSlots(a.fillContext(ctx))
+}
+
+func (a *announcer) fillContext(fallback context.Context) context.Context {
+	if a.parent != nil {
+		return a.parent
+	}
+	return fallback
+}
+
+func ratioReached(target float64, size, uploaded int64) bool {
+	if target <= 0 || size <= 0 || uploaded < 0 {
+		return false
+	}
+	return float64(uploaded)/float64(size) >= target
+}
+
+func backoffDelay(failures int, minDelay, maxDelay time.Duration) time.Duration {
+	if failures < 1 {
+		failures = 1
+	}
+	delay := minDelay
+	for i := 1; i < failures; i++ {
+		if delay >= maxDelay/2 {
+			return maxDelay
+		}
+		delay *= 2
+	}
+	if delay > maxDelay {
+		return maxDelay
+	}
+	return delay
 }
 
 func eventName(e clientemu.Event) string {
