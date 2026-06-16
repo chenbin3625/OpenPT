@@ -25,7 +25,7 @@
   },
   "metrics": {
     "enabled": true,
-    "listen": "0.0.0.0:9090",
+    "listen": "127.0.0.1:9090",
     "path": "/metrics",
     "webui": true
   },
