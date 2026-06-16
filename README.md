@@ -50,25 +50,6 @@ Windows 下运行：
 
 ## Docker Compose
 
-准备目录：
-
-```sh
-mkdir -p openpt-data/torrents openpt-data/torrents/archived openpt-data/clients
-cp config.example.json openpt-data/config.json
-cp clients/*.client openpt-data/clients/
-```
-
-编辑 `openpt-data/config.json`，建议保持：
-
-```json
-{
-  "torrents_dir": "/data/torrents",
-  "archive_dir": "/data/torrents/archived",
-  "clients_dir": "/data/clients",
-  "client": "qbittorrent-5.1.4.client"
-}
-```
-
 创建 `compose.yml`：
 
 ```yaml
@@ -79,10 +60,24 @@ services:
     restart: unless-stopped
     volumes:
       - ./openpt-data:/data
-    command: ["--config", "/data/config.json"]
 ```
 
 启动：
+
+```sh
+docker compose up -d
+```
+
+首次启动会在 `openpt-data` 中生成基础文件和目录：
+
+- `config.json`
+- `torrents/`
+- `torrents/archived/`
+- `clients/`
+
+编辑 `openpt-data/config.json`，默认客户端为 `qbittorrent-5.1.4.client`。把需要保种的 `.torrent` 文件放入 `openpt-data/torrents`。
+
+再次启动或重载：
 
 ```sh
 docker compose up -d
