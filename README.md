@@ -64,7 +64,7 @@ Windows 下运行：
 ```yaml
 services:
   openpt:
-    image: chenbin3625/openpt:0.0.1
+    image: chenbin3625/openpt
     container_name: openpt
     restart: unless-stopped
     volumes:
@@ -110,11 +110,11 @@ docker compose down
 - `conservative_rate`：按较低速率累计上传量
 - `configured_rate`：按配置速率累计上传量
 
-当 `uploaded.max_rate_bps` 大于 0 时，OpenPT 会像 joal 一样在区间内随机选择当前全局速度，并按 `uploaded.random_refresh_seconds` 定期刷新；这不要求 `uploaded.configured_rate_bps` 非 0。没有显式区间但设置了 `uploaded.random_jitter_percent` 时，会围绕当前策略速率生成随机上下浮动。
+当 `uploaded.max_rate_bps` 大于 0 时，OpenPT 会在区间内随机选择当前全局速度，并按 `uploaded.random_refresh_seconds` 定期刷新；这不要求 `uploaded.configured_rate_bps` 非 0。没有显式区间但设置了 `uploaded.random_jitter_percent` 时，会围绕当前策略速率生成随机上下浮动。
 
 OpenPT 会根据 tracker 返回的 peers 分配每个 torrent 的上传速度：有更多 leechers、且 leechers 占比更高的 torrent 会获得更多带宽。
 
-为兼容 JOAL，`keep_torrent_with_zero_leechers=false` 时，只要 tracker 返回的 seeders 或 leechers 任一为 0，OpenPT 都会发送 `stopped` 并归档该 torrent。
+`keep_torrent_with_zero_leechers=false` 时，只要 tracker 返回的 seeders 或 leechers 任一为 0，OpenPT 都会发送 `stopped` 并归档该 torrent。
 
 无论使用哪种策略，OpenPT 都不会让 `downloaded` 随时间增长，完整保种场景下 `left` 始终为 `0`。
 
