@@ -634,9 +634,9 @@
                     <td class="number-cell">${t.leechers}</td>
                     <td class="number-cell ratio-cell ${getRatioClass(t.ratio)}">${formatRatio(t.ratio)}</td>
                     <td class="number-cell failures-cell">
-                        <span class="failures-badge ${getFailuresClass(t.failures)}">
+                        <span class="failures-badge ${t.has_issue ? (t.failures > 0 ? 'danger' : 'warning') : 'ok'}">
                             ${statusIcon}
-                            ${t.failures > 0 ? t.failures + ' 次失败' : '正常'}
+                            ${t.has_issue ? (t.issue_reason || '异常') : '正常'}
                         </span>
                         ${tooltip}
                     </td>
