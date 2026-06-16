@@ -102,7 +102,7 @@ jobs:
             -ldflags="-s -w -X main.version=${version} -X main.commit=${commit} -X main.date=${date}" \
             -o "dist/${APP_NAME}-${version}-${suffix}/${binary}" \
             ./cmd/openpt
-          cp README.md examples/config.example.json "dist/${APP_NAME}-${version}-${suffix}/"
+          cp README.md examples/config.example.toml "dist/${APP_NAME}-${version}-${suffix}/"
           cp -R clients "dist/${APP_NAME}-${version}-${suffix}/clients"
           cd dist
           if [ "${GOOS}" = "windows" ]; then
