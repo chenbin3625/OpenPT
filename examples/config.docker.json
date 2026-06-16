@@ -12,13 +12,32 @@
   },
   "tracker": {
     "timeout_seconds": 15,
-    "proxy": ""
+    "proxy": "",
+    "reuse_connections": true,
+    "max_idle_conns": 100,
+    "max_idle_conns_per_host": 10,
+    "idle_conn_timeout_seconds": 90,
+    "failure_backoff_min_seconds": 5,
+    "failure_backoff_max_seconds": 300
+  },
+  "logging": {
+    "file": ""
+  },
+  "metrics": {
+    "enabled": false,
+    "listen": "127.0.0.1:9090",
+    "path": "/metrics"
   },
   "max_consecutive_failures": 5,
   "uploaded": {
     "strategy": "none",
     "conservative_rate_bps": 1024,
-    "configured_rate_bps": 0
+    "configured_rate_bps": 0,
+    "min_rate_bps": 0,
+    "max_rate_bps": 0,
+    "random_jitter_percent": 10,
+    "random_refresh_seconds": 1200,
+    "ratio_target": 0
   },
   "scan_interval_seconds": 5,
   "shutdown_stop_timeout_seconds": 20
