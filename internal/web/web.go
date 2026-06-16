@@ -70,7 +70,6 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()

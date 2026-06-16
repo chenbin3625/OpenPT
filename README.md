@@ -177,10 +177,12 @@ services:
     container_name: openpt
     restart: unless-stopped
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"  # 仅本地访问，如需远程访问改为 "9090:9090"
     volumes:
       - ./openpt-data:/data
 ```
+
+> **安全提示**: 默认仅绑定 `127.0.0.1`，如需远程访问 Web UI，请将端口映射改为 `"9090:9090"` 并确保网络环境安全。
 
 启动：
 
