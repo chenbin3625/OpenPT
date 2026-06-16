@@ -103,6 +103,7 @@ jobs:
             -o "dist/${APP_NAME}-${version}-${suffix}/${binary}" \
             ./cmd/openpt
           cp README.md examples/config.example.json "dist/${APP_NAME}-${version}-${suffix}/"
+          cp -R clients "dist/${APP_NAME}-${version}-${suffix}/clients"
           cd dist
           if [ "${GOOS}" = "windows" ]; then
             zip -r "${APP_NAME}-${version}-${suffix}.zip" "${APP_NAME}-${version}-${suffix}"

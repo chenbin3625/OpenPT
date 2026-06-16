@@ -10,7 +10,7 @@
   "peerIdGenerator": {
     "algorithm": {
       "type": "REGEX",
-      "pattern": "-qB4670-[A-Za-z0-9_~\\(\\)\\!\\.\\*-]{12}"
+      "pattern": "-qB5200-[A-Za-z0-9_~\\(\\)\\!\\.\\*-]{12}"
     },
     "refreshOn": "NEVER",
     "shouldUrlEncode": false
@@ -25,7 +25,7 @@
   "requestHeaders": [
     {
       "name": "User-Agent",
-      "value": "qBittorrent/4.6.7"
+      "value": "qBittorrent/5.2.0"
     },
     {
       "name": "Accept-Encoding",

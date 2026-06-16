@@ -2,78 +2,59 @@
 
 OpenPT 是一个无 WebUI、完全配置驱动的 tracker announce 程序，用于让已有 `.torrent` 以完整 seeder 身份定期向 tracker 汇报状态。
 
-项目默认采用保守行为：`left=0`，`downloaded=0`，`uploaded` 默认不增长。上传量统计可以通过配置关闭或按低速策略累计。
+默认行为偏保守：`left=0`，`downloaded=0`，`uploaded` 默认不增长。上传量统计可以通过配置关闭，也可以按低速或固定速率策略累计。
 
-## 基础功能
+## 功能
 
-- 通过配置文件启动，只保留必要 CLI 参数 `--config`
-- 扫描并监听 torrent 目录，支持运行时热加载新增 `.torrent`
-- 自动解析 `.torrent` 的 tracker、名称、大小和 `info_hash`
+- 无 WebUI，无管理端口，所有运行参数来自配置文件
 - 支持 HTTP/HTTPS tracker announce
 - 支持 `started`、regular、`stopped` announce 流程
-- 收到 `SIGINT` 或 `SIGTERM` 时优雅退出，并发送 `stopped`
+- 自动解析 `.torrent` 的 tracker、名称、大小和 `info_hash`
+- 扫描并监听 torrent 目录，新增 `.torrent` 后自动加载
 - 无效 torrent 会移动到 archive 目录
-- 支持配置 tracker timeout、proxy、最大连续失败次数
-- 支持上传统计策略：`none`、`conservative_rate`、`configured_rate`
-- 输出清晰运行日志，包含配置加载、torrent 加载、announce 事件、tracker 响应和归档原因
+- 收到 `SIGINT` 或 `SIGTERM` 时优雅退出，并发送 `stopped`
+- 支持同时保种数量限制
+- 支持 tracker 超时、代理和最大连续失败次数配置
+- 支持上传量策略：`none`、`conservative_rate`、`configured_rate`
+- 内置多种客户端伪装配置，位于 `clients/` 目录
 
-## 运行方式
+## 使用方法
 
-```sh
-cd OpenPT
-go run ./cmd/openpt --config examples/config.example.json
-```
+从 Release 下载对应系统的压缩包，解压后进入目录。
 
-构建二进制：
+编辑 `config.example.json`，至少确认这些路径和选项：
 
-```sh
-go build -o openpt ./cmd/openpt
-./openpt --config examples/config.example.json
-```
-
-## 配置示例
-
-配置示例位于：
-
-[examples/config.example.json](examples/config.example.json)
-
-常用字段：
-
-- `torrents_dir`：torrent 文件目录
+- `torrents_dir`：放置 `.torrent` 文件的目录
 - `archive_dir`：无效或归档 torrent 的目录
-- `clients_dir`：客户端伪装配置目录
-- `client`：使用的客户端配置文件名
+- `clients_dir`：客户端伪装配置目录，默认可使用 `./clients`
+- `client`：要使用的客户端配置文件名，例如 `qbittorrent-4.6.7.client`
 - `simultaneous_seed`：同时保种数量
-- `keep_torrent_with_zero_leechers`：tracker 返回 0 leechers 时是否继续保留
 - `announce.port`：announce 上报端口
 - `tracker.timeout_seconds`：tracker 请求超时
-- `tracker.proxy`：代理地址，例如 `http://127.0.0.1:7890`
-- `max_consecutive_failures`：连续失败归档阈值
-- `uploaded.strategy`：上传量策略
+- `tracker.proxy`：代理地址，可留空
+- `uploaded.strategy`：上传量策略，默认建议使用 `none`
 
-## 验证
-
-```sh
-gofmt -w cmd internal
-go test ./...
-go build -o /tmp/openpt-check ./cmd/openpt
-```
-
-## 发布
-
-推送版本标签会触发自动发布流程：
+把需要保种的 `.torrent` 文件放入 `torrents_dir`，然后运行：
 
 ```sh
-git tag v0.0.1
-git push origin v0.0.1
+./openpt --config config.example.json
 ```
 
-发布流程会自动构建常见平台二进制，并创建 GitHub Release。Docker Hub 推送需要在 GitHub 仓库中配置：
+Windows 下运行：
 
-- `DOCKERHUB_USERNAME`
-- `DOCKERHUB_TOKEN`
+```powershell
+.\openpt.exe --config config.example.json
+```
 
-默认镜像仓库为 `chenbin3625/openpt`。如需修改，可设置仓库变量 `DOCKERHUB_REPOSITORY`。
+停止程序时按 `Ctrl+C`，OpenPT 会尽量向已启动的 torrent 发送 `stopped` announce。
+
+## 上传量策略
+
+- `none`：不累计上传量，默认推荐
+- `conservative_rate`：按较低速率累计上传量
+- `configured_rate`：按配置的固定速率累计上传量
+
+无论使用哪种策略，OpenPT 都不会让 `downloaded` 随时间增长，完整保种场景下 `left` 始终为 `0`。
 
 ## 当前限制
 

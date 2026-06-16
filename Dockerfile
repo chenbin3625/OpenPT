@@ -26,6 +26,7 @@ RUN apk add --no-cache ca-certificates tzdata && \
 WORKDIR /app
 COPY --from=build /out/openpt /usr/local/bin/openpt
 COPY examples /app/examples
+COPY clients /app/clients
 
 USER openpt
 VOLUME ["/data"]
