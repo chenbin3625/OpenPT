@@ -2,8 +2,8 @@
   "torrents_dir": "/data/torrents",
   "archive_dir": "/data/torrents/archived",
   "clients_dir": "/data/clients",
-  "client": "qbittorrent-5.1.4.client",
-  "simultaneous_seed": 50,
+  "client": "utorrent-3.5.0_43916.client",
+  "simultaneous_seed": 200,
   "keep_torrent_with_zero_leechers": true,
   "announce": {
     "port": 6881,
@@ -30,11 +30,11 @@
   },
   "max_consecutive_failures": 5,
   "uploaded": {
-    "strategy": "none",
+    "strategy": "configured_rate",
     "conservative_rate_bps": 1024,
-    "configured_rate_bps": 0,
-    "min_rate_bps": 0,
-    "max_rate_bps": 0,
+    "configured_rate_bps": 170000,
+    "min_rate_bps": 30000,
+    "max_rate_bps": 170000,
     "random_jitter_percent": 10,
     "random_refresh_seconds": 1200,
     "ratio_target": 0
