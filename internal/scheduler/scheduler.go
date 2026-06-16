@@ -58,8 +58,9 @@ type Scheduler struct {
 	store   *store.Store
 	log     *slog.Logger
 
-	mu     sync.Mutex
-	active map[[20]byte]*announcer
+	mu        sync.Mutex
+	active    map[[20]byte]*announcer
+	completed map[[20]byte]bool // 已完成的种子，不再重新添加
 }
 
 type announcer struct {
@@ -69,6 +70,7 @@ type announcer struct {
 	lastInterval time.Duration
 	failures     int
 	started      bool
+	completed    bool // 标记已完成（达到分享率或其他原因停止）
 	parent       context.Context
 	cancel       context.CancelFunc
 }
@@ -76,7 +78,8 @@ type announcer struct {
 func New(cfg config.Config, emu *clientemu.Client, tc *tracker.Client, bw *bandwidth.Dispatcher, st *store.Store, log *slog.Logger) *Scheduler {
 	return &Scheduler{
 		cfg: cfg, client: emu, tracker: tc, bw: bw, store: st, log: log,
-		active: map[[20]byte]*announcer{},
+		active:    map[[20]byte]*announcer{},
+		completed: map[[20]byte]bool{},
 	}
 }
 
@@ -92,8 +95,8 @@ func (s *Scheduler) Start(ctx context.Context) {
 				case store.Added:
 					s.fillSlots(ctx)
 				case store.Removed:
-					s.stopTorrent(ev.Torrent.InfoHash)
-					s.fillSlots(ctx)
+					s.stopTorrent(ctx, ev.Torrent.InfoHash)
+					// fillSlots 已在 stopTorrent 中调用，不需要重复
 				}
 			}
 		}
@@ -158,6 +161,10 @@ func (s *Scheduler) fillSlots(parent context.Context) {
 		for hash := range s.active {
 			active[hash] = true
 		}
+		// 将已完成的种子也加入排除列表
+		for hash := range s.completed {
+			active[hash] = true
+		}
 		s.mu.Unlock()
 		t, err := s.store.PickNotIn(active)
 		if err != nil {
@@ -182,14 +189,20 @@ func (s *Scheduler) tryAdd(parent context.Context, t *torrent.Torrent) bool {
 	return true
 }
 
-func (s *Scheduler) stopTorrent(hash [20]byte) {
+func (s *Scheduler) stopTorrent(ctx context.Context, hash [20]byte) {
 	a := s.removeActive(hash)
 	if a != nil {
 		s.bw.Unregister(a.torrent.InfoHashHex())
 	}
 	if a != nil && a.started {
-		go s.announce(context.Background(), a, clientemu.EventStopped)
+		// 同步等待 stopped announce 完成
+		s.announce(ctx, a, clientemu.EventStopped)
 	}
+	// 清除已完成标记，允许该种子重新添加
+	s.mu.Lock()
+	delete(s.completed, hash)
+	s.mu.Unlock()
+	s.fillSlots(ctx)
 }
 
 func (s *Scheduler) removeActive(hash [20]byte) *announcer {
@@ -206,6 +219,7 @@ func (s *Scheduler) removeActive(hash [20]byte) *announcer {
 }
 
 func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Event, delay time.Duration) {
+	const maxFailures = 10 // 最大失败次数限制
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	for {
@@ -223,11 +237,17 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 			a.failures++
 			delay := backoffDelay(a.failures, cfg.TrackerFailureBackoffMin(), cfg.TrackerFailureBackoffMax())
 			s.log.Warn("announce failed", "event", eventName(event), "name", a.torrent.Name, "failures", a.failures, "retry_in", delay, "error", err)
-			if a.failures >= cfg.MaxConsecutiveFailures {
-				s.log.Warn("max consecutive failures reached; archiving torrent", "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex())
-				s.archiveTorrent(ctx, a, "max consecutive announce failures")
+
+			// 达到最大失败次数，停止该种子
+			if a.failures >= maxFailures {
+				s.log.Warn("max failures reached; stopping torrent", "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex(), "failures", a.failures)
+				s.markCompleted(a.torrent.InfoHash)
+				s.bw.Unregister(a.torrent.InfoHashHex())
+				s.removeActive(a.torrent.InfoHash)
+				s.fillSlots(a.fillContext(ctx))
 				return
 			}
+
 			timer.Reset(delay)
 			continue
 		} else {
@@ -248,14 +268,6 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 			}
 			if ratioReached(cfg.Uploaded.RatioTarget, a.torrent.Size, s.bw.Get(a.torrent.InfoHashHex()).Uploaded) {
 				s.completeTorrent(ctx, a, cfg.Uploaded.RatioTarget)
-				return
-			}
-			if !cfg.KeepTorrentWithZeroLeechers && resp.Leechers < 1 {
-				s.log.Info("archiving torrent with no peers", "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex(), "seeders", resp.Seeders, "leechers", resp.Leechers)
-				if _, err := s.announce(ctx, a, clientemu.EventStopped); err != nil {
-					s.log.Warn("failed to send stopped announce after no peers", "name", a.torrent.Name, "error", err)
-				}
-				s.archiveTorrent(ctx, a, "tracker reported zero seeders or leechers")
 				return
 			}
 		}
@@ -307,14 +319,18 @@ func (s *Scheduler) completeTorrent(ctx context.Context, a *announcer, ratioTarg
 	if _, err := s.announce(ctx, a, clientemu.EventStopped); err != nil {
 		s.log.Warn("failed to send stopped announce after ratio target", "name", a.torrent.Name, "error", err)
 	}
-	s.archiveTorrent(ctx, a, "ratio target reached")
-}
-
-func (s *Scheduler) archiveTorrent(ctx context.Context, a *announcer, reason string) {
+	// 标记为已完成，防止重新添加
+	s.markCompleted(a.torrent.InfoHash)
 	s.bw.Unregister(a.torrent.InfoHashHex())
 	s.removeActive(a.torrent.InfoHash)
-	s.store.ArchiveByHash(a.torrent.InfoHash, reason)
 	s.fillSlots(a.fillContext(ctx))
+}
+
+// markCompleted 标记种子为已完成状态，防止重新调度
+func (s *Scheduler) markCompleted(hash [20]byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.completed[hash] = true
 }
 
 func (a *announcer) fillContext(fallback context.Context) context.Context {

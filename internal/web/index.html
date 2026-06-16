@@ -3,750 +3,751 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpenPT - 种子状态监控</title>
+    <title>OpenPT 监控面板</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: #f5f5f5;
-            color: #333;
-            line-height: 1.6;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
+
+        :root {
+            --primary: #3b82f6;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --bg: #f9fafb;
+            --card: #ffffff;
+            --text: #1f2937;
+            --text-muted: #6b7280;
+            --border: #e5e7eb;
+            --hover: #f3f4f6;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+        }
+
+        /* Header */
+        header {
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+            padding: 1.5rem 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
         .container {
             max-width: 1400px;
             margin: 0 auto;
-            padding: 20px;
+            padding: 0 1.5rem;
         }
-        header {
-            background: #2c3e50;
-            color: white;
-            padding: 20px 0;
-            margin-bottom: 20px;
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
         }
-        header h1 {
-            font-size: 24px;
-            font-weight: 500;
+
+        /* Stats Grid */
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
         }
-        .stats-bar {
+
+        .stat {
             display: flex;
-            gap: 30px;
-            margin-top: 10px;
-            font-size: 14px;
+            flex-direction: column;
+            gap: 0.25rem;
         }
-        .stat-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
+
         .stat-label {
-            opacity: 0.8;
+            font-size: 0.875rem;
+            color: var(--text-muted);
         }
+
         .stat-value {
+            font-size: 1.25rem;
             font-weight: 600;
-            font-size: 18px;
         }
-        .stat-value.warning {
-            color: #f39c12;
-        }
-        .stat-value.danger {
-            color: #e74c3c;
-        }
-        .card {
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            overflow: hidden;
-            margin-bottom: 20px;
-        }
-        .card-header {
-            padding: 16px 20px;
-            border-bottom: 1px solid #eee;
-            display: flex;
-            justify-content: space-between;
+
+        .stat-value.success { color: var(--success); }
+        .stat-value.warning { color: var(--warning); }
+        .stat-value.danger { color: var(--danger); }
+
+        /* Connection Status */
+        .status {
+            display: inline-flex;
             align-items: center;
-            flex-wrap: wrap;
-            gap: 12px;
+            gap: 0.5rem;
+            font-size: 0.875rem;
         }
+
+        .status-dot {
+            width: 0.5rem;
+            height: 0.5rem;
+            border-radius: 50%;
+            background: var(--danger);
+        }
+
+        .status-dot.active {
+            background: var(--success);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Card */
+        .card {
+            background: var(--card);
+            border-radius: 0.5rem;
+            border: 1px solid var(--border);
+            margin-top: 1.5rem;
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: center;
+            justify-content: space-between;
+        }
+
         .card-title {
-            font-size: 16px;
+            font-size: 1rem;
             font-weight: 600;
         }
+
+        /* Toolbar */
         .toolbar {
             display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
             align-items: center;
-            gap: 12px;
         }
-        .filter-group {
-            display: flex;
-            gap: 4px;
-        }
-        .filter-btn, .action-btn {
-            padding: 6px 12px;
-            border: 1px solid #ddd;
-            background: white;
-            border-radius: 4px;
-            font-size: 13px;
+
+        /* Buttons */
+        button {
+            border: none;
             cursor: pointer;
+            font: inherit;
             transition: all 0.2s;
         }
-        .filter-btn:hover, .action-btn:hover {
-            background: #f8f9fa;
-        }
-        .filter-btn.active {
-            background: #3498db;
-            color: white;
-            border-color: #3498db;
-        }
-        .action-btn {
-            display: flex;
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            display: inline-flex;
             align-items: center;
-            gap: 4px;
+            gap: 0.5rem;
         }
-        .action-btn svg {
-            width: 14px;
-            height: 14px;
+
+        .btn-secondary {
+            background: var(--card);
+            border: 1px solid var(--border);
+            color: var(--text);
         }
-        .filter-btn .badge {
-            display: inline-block;
-            padding: 1px 6px;
-            border-radius: 10px;
-            font-size: 11px;
-            margin-left: 4px;
+
+        .btn-secondary:hover {
+            background: var(--hover);
         }
-        .filter-btn .badge.danger {
-            background: #e74c3c;
+
+        .btn-secondary.active {
+            background: var(--primary);
             color: white;
+            border-color: var(--primary);
         }
-        .filter-input {
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
+
+        .btn-icon {
+            padding: 0.5rem;
+            background: none;
+            color: var(--text-muted);
+        }
+
+        .btn-icon:hover {
+            color: var(--text);
+            background: var(--hover);
+            border-radius: 0.375rem;
+        }
+
+        /* Badge */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.125rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-left: 0.25rem;
+        }
+
+        .badge.danger {
+            background: #fee2e2;
+            color: var(--danger);
+        }
+
+        /* Input */
+        input[type="text"] {
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 0.375rem;
+            font: inherit;
+            font-size: 0.875rem;
             width: 200px;
         }
-        .filter-input:focus {
+
+        input[type="text"]:focus {
             outline: none;
-            border-color: #3498db;
+            border-color: var(--primary);
         }
+
+        /* Table */
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
         table {
             width: 100%;
             border-collapse: collapse;
         }
+
         th {
-            background: #f8f9fa;
-            padding: 12px 16px;
+            padding: 0.75rem 1rem;
             text-align: left;
+            font-size: 0.75rem;
             font-weight: 600;
-            font-size: 13px;
-            color: #666;
+            color: var(--text-muted);
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.05em;
+            background: var(--hover);
             cursor: pointer;
             user-select: none;
             white-space: nowrap;
         }
+
         th:hover {
-            background: #e9ecef;
+            background: var(--border);
         }
-        th.sorted-asc::after { content: " ▲"; }
-        th.sorted-desc::after { content: " ▼"; }
+
+        th.sortable::after {
+            content: ' ⇅';
+            opacity: 0.3;
+        }
+
+        th.sorted-asc::after {
+            content: ' ↑';
+            opacity: 1;
+        }
+
+        th.sorted-desc::after {
+            content: ' ↓';
+            opacity: 1;
+        }
+
         td {
-            padding: 12px 16px;
-            border-top: 1px solid #eee;
-            font-size: 14px;
+            padding: 0.75rem 1rem;
+            border-top: 1px solid var(--border);
+            font-size: 0.875rem;
         }
+
         tr:hover td {
-            background: #f8f9fa;
+            background: var(--hover);
         }
-        tr.row-issue td {
-            background: #fff5f5;
+
+        tr.issue td {
+            background: #fef2f2;
         }
-        tr.row-issue:hover td {
-            background: #ffe8e8;
+
+        tr.issue:hover td {
+            background: #fee2e2;
         }
-        .hash-cell {
-            font-family: monospace;
-            font-size: 12px;
-            color: #666;
-            max-width: 120px;
-            overflow: hidden;
-            text-overflow: ellipsis;
+
+        .text-right {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
         }
-        .name-cell {
+
+        .text-mono {
+            font-family: 'SF Mono', Consolas, monospace;
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+        }
+
+        .text-truncate {
             max-width: 350px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-        .number-cell {
-            text-align: right;
-            font-variant-numeric: tabular-nums;
-        }
-        .speed-cell {
-            color: #27ae60;
-            font-weight: 500;
-        }
-        .ratio-cell {
-            font-weight: 500;
-        }
-        .ratio-good { color: #27ae60; }
-        .ratio-medium { color: #f39c12; }
-        .ratio-low { color: #e74c3c; }
-        .failures-cell {
-            text-align: center;
-            position: relative;
-        }
-        .failures-badge {
+
+        .text-success { color: var(--success); font-weight: 500; }
+        .text-warning { color: var(--warning); font-weight: 500; }
+        .text-danger { color: var(--danger); font-weight: 500; }
+
+        /* Status Badge */
+        .status-badge {
             display: inline-flex;
             align-items: center;
-            gap: 4px;
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 12px;
+            gap: 0.375rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 1rem;
+            font-size: 0.8125rem;
             font-weight: 500;
-            cursor: help;
-        }
-        .failures-badge.ok {
-            background: #e8f5e9;
-            color: #27ae60;
-        }
-        .failures-badge.warning {
-            background: #fff3e0;
-            color: #f39c12;
-        }
-        .failures-badge.danger {
-            background: #ffebee;
-            color: #e74c3c;
-        }
-        .issue-icon {
-            width: 14px;
-            height: 14px;
-        }
-        .tooltip {
-            position: absolute;
-            bottom: 100%;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #333;
-            color: white;
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            white-space: nowrap;
-            pointer-events: none;
-            opacity: 0;
-            transition: opacity 0.2s;
-            z-index: 100;
-        }
-        .tooltip::after {
-            content: '';
-            position: absolute;
-            top: 100%;
-            left: 50%;
-            transform: translateX(-50%);
-            border: 6px solid transparent;
-            border-top-color: #333;
-        }
-        .failures-cell:hover .tooltip {
-            opacity: 1;
-        }
-        .empty-state {
-            padding: 60px 20px;
-            text-align: center;
-            color: #999;
-        }
-        .empty-state svg {
-            width: 64px;
-            height: 64px;
-            margin-bottom: 16px;
-            opacity: 0.5;
-        }
-        .connection-status {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 13px;
-        }
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #e74c3c;
-        }
-        .status-dot.connected {
-            background: #27ae60;
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .tracker-cell {
-            font-size: 12px;
-            color: #666;
-            max-width: 150px;
-            overflow: hidden;
-            text-overflow: ellipsis;
         }
 
-        /* Config modal */
+        .status-badge.ok {
+            background: #d1fae5;
+            color: var(--success);
+        }
+
+        .status-badge.warning {
+            background: #fef3c7;
+            color: var(--warning);
+        }
+
+        .status-badge.error {
+            background: #fee2e2;
+            color: var(--danger);
+        }
+
+        .status-icon {
+            width: 0.875rem;
+            height: 0.875rem;
+        }
+
+        /* Empty State */
+        .empty {
+            padding: 4rem 2rem;
+            text-align: center;
+            color: var(--text-muted);
+        }
+
+        .empty-icon {
+            width: 3rem;
+            height: 3rem;
+            margin: 0 auto 1rem;
+            opacity: 0.4;
+        }
+
+        .empty h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--text);
+        }
+
+        .empty p {
+            font-size: 0.875rem;
+        }
+
+        /* Modal */
         .modal-overlay {
             display: none;
             position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
             z-index: 1000;
-            justify-content: center;
             align-items: center;
+            justify-content: center;
+            padding: 1rem;
         }
+
         .modal-overlay.active {
             display: flex;
         }
+
         .modal {
-            background: white;
-            border-radius: 12px;
-            width: 90%;
+            background: var(--card);
+            border-radius: 0.75rem;
+            width: 100%;
             max-width: 600px;
-            max-height: 80vh;
+            max-height: 85vh;
             display: flex;
             flex-direction: column;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
         }
+
         .modal-header {
-            padding: 20px 24px;
-            border-bottom: 1px solid #eee;
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid var(--border);
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            justify-content: space-between;
         }
+
         .modal-title {
-            font-size: 18px;
+            font-size: 1.125rem;
             font-weight: 600;
         }
-        .modal-close {
-            width: 32px;
-            height: 32px;
-            border: none;
-            background: none;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 6px;
-            color: #666;
-        }
-        .modal-close:hover {
-            background: #f5f5f5;
-        }
+
         .modal-body {
-            padding: 24px;
+            padding: 1.5rem;
             overflow-y: auto;
             flex: 1;
         }
-        .config-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        .config-table tr:not(:last-child) td {
-            border-bottom: 1px solid #f0f0f0;
-        }
-        .config-table td {
-            padding: 12px 0;
-            font-size: 14px;
-        }
-        .config-label {
-            color: #666;
-            width: 40%;
-            padding-right: 16px;
-        }
-        .config-value {
-            font-weight: 500;
-            word-break: break-all;
-        }
-        .config-value.mono {
-            font-family: monospace;
-            font-size: 13px;
+
+        .config-row {
+            display: grid;
+            grid-template-columns: 2fr 3fr;
+            gap: 1rem;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.875rem;
         }
 
+        .config-row:last-child {
+            border-bottom: none;
+        }
+
+        .config-label {
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .config-value {
+            font-weight: 600;
+            word-break: break-word;
+        }
+
+        /* Icon */
+        svg {
+            width: 1rem;
+            height: 1rem;
+        }
+
+        /* Responsive */
         @media (max-width: 768px) {
-            .container { padding: 10px; }
-            .stats-bar { flex-wrap: wrap; gap: 15px; }
-            .filter-input { width: 100%; }
-            td, th { padding: 8px 12px; }
-            .hash-cell, .tracker-cell { display: none; }
-            .modal { width: 95%; }
+            .container {
+                padding: 0 1rem;
+            }
+
+            .stats {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            input[type="text"] {
+                width: 100%;
+            }
+
+            .text-mono,
+            .tracker {
+                display: none;
+            }
+
+            .config-row {
+                grid-template-columns: 1fr;
+                gap: 0.25rem;
+            }
         }
     </style>
 </head>
 <body>
     <header>
         <div class="container">
-            <h1>OpenPT 种子状态监控</h1>
-            <div class="stats-bar">
-                <div class="stat-item">
-                    <span class="stat-label">活跃种子:</span>
-                    <span class="stat-value" id="active-count">0</span>
+            <h1>OpenPT 监控面板</h1>
+            <div class="stats">
+                <div class="stat">
+                    <span class="stat-label">活跃种子</span>
+                    <span class="stat-value" id="active">0</span>
                 </div>
-                <div class="stat-item">
-                    <span class="stat-label">异常种子:</span>
-                    <span class="stat-value" id="issue-count">0</span>
+                <div class="stat">
+                    <span class="stat-label">异常种子</span>
+                    <span class="stat-value" id="issues">0</span>
                 </div>
-                <div class="stat-item">
-                    <span class="stat-label">总上传速度:</span>
-                    <span class="stat-value" id="total-speed">0 B/s</span>
+                <div class="stat">
+                    <span class="stat-label">上传速度</span>
+                    <span class="stat-value text-success" id="speed">0 B/s</span>
                 </div>
-                <div class="stat-item">
-                    <span class="stat-label">总上传量:</span>
-                    <span class="stat-value" id="total-uploaded">0 B</span>
+                <div class="stat">
+                    <span class="stat-label">总上传量</span>
+                    <span class="stat-value" id="uploaded">0 B</span>
                 </div>
-                <div class="stat-item">
-                    <div class="connection-status">
-                        <span class="status-dot" id="status-dot"></span>
-                        <span id="connection-text">连接中...</span>
-                    </div>
+                <div class="stat">
+                    <span class="stat-label">状态</span>
+                    <span class="status">
+                        <span class="status-dot" id="dot"></span>
+                        <span id="status-text">连接中...</span>
+                    </span>
                 </div>
             </div>
         </div>
     </header>
 
-    <div class="container">
+    <main class="container">
         <div class="card">
             <div class="card-header">
                 <span class="card-title">种子列表</span>
                 <div class="toolbar">
-                    <div class="filter-group">
-                        <button class="filter-btn active" data-filter="all">全部</button>
-                        <button class="filter-btn" data-filter="issue">异常 <span class="badge danger" id="issue-badge">0</span></button>
-                        <button class="filter-btn" data-filter="normal">正常</button>
-                    </div>
-                    <button class="action-btn" id="config-btn" title="查看当前配置">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="3"/>
-                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                        </svg>
-                        当前配置
+                    <button class="btn btn-secondary active" data-filter="all">全部</button>
+                    <button class="btn btn-secondary" data-filter="issue">
+                        异常<span class="badge danger" id="badge">0</span>
                     </button>
-                    <input type="text" class="filter-input" id="filter" placeholder="搜索种子名称...">
+                    <button class="btn btn-secondary" data-filter="ok">正常</button>
+                    <button class="btn-icon" id="config-btn" title="查看配置">
+                        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                            <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                        </svg>
+                    </button>
+                    <input type="text" id="search" placeholder="搜索种子...">
                 </div>
             </div>
-            <div id="table-container">
+            <div id="table-wrapper" class="table-wrapper">
                 <table>
                     <thead>
                         <tr>
-                            <th data-sort="info_hash">Info Hash</th>
-                            <th data-sort="name">名称</th>
-                            <th data-sort="size" class="number-cell">大小</th>
-                            <th data-sort="uploaded" class="number-cell">已上传</th>
-                            <th data-sort="speed_bps" class="number-cell">速度</th>
-                            <th data-sort="seeders" class="number-cell">做种</th>
-                            <th data-sort="leechers" class="number-cell">下载</th>
-                            <th data-sort="ratio" class="number-cell">分享率</th>
-                            <th data-sort="failures" class="number-cell">状态</th>
-                            <th data-sort="tracker_host">Tracker</th>
+                            <th class="sortable" data-sort="info_hash">Info Hash</th>
+                            <th class="sortable" data-sort="name">名称</th>
+                            <th class="sortable text-right" data-sort="size">大小</th>
+                            <th class="sortable text-right" data-sort="uploaded">已上传</th>
+                            <th class="sortable text-right" data-sort="speed_bps">速度</th>
+                            <th class="sortable text-right" data-sort="seeders">做种</th>
+                            <th class="sortable text-right" data-sort="leechers">下载</th>
+                            <th class="sortable text-right" data-sort="ratio">分享率</th>
+                            <th class="sortable text-right" data-sort="failures">状态</th>
+                            <th class="sortable tracker" data-sort="tracker_host">Tracker</th>
                         </tr>
                     </thead>
-                    <tbody id="torrent-list">
-                    </tbody>
+                    <tbody id="tbody"></tbody>
                 </table>
             </div>
-            <div class="empty-state" id="empty-state" style="display: none;">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="17 8 12 3 7 8"/>
-                    <line x1="12" y1="3" x2="12" y2="15"/>
+            <div id="empty" class="empty" style="display: none;">
+                <svg class="empty-icon" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z"/>
                 </svg>
-                <p id="empty-text">暂无活跃种子</p>
-                <p style="font-size: 14px; margin-top: 8px;" id="empty-hint">请将 .torrent 文件放入 torrents 目录</p>
+                <h3 id="empty-title">暂无种子</h3>
+                <p id="empty-desc">请将 .torrent 文件放入 torrents 目录</p>
             </div>
         </div>
-    </div>
+    </main>
 
-    <!-- Config Modal -->
-    <div class="modal-overlay" id="config-modal">
+    <div class="modal-overlay" id="modal">
         <div class="modal">
             <div class="modal-header">
                 <span class="modal-title">当前配置</span>
-                <button class="modal-close" id="modal-close">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="18" y1="6" x2="6" y2="18"/>
-                        <line x1="6" y1="6" x2="18" y2="18"/>
+                <button class="btn-icon" id="close">
+                    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
                     </svg>
                 </button>
             </div>
-            <div class="modal-body">
-                <table class="config-table" id="config-table">
-                    <tbody id="config-list">
-                    </tbody>
-                </table>
-            </div>
+            <div class="modal-body" id="config"></div>
         </div>
     </div>
 
     <script>
-        let torrents = [];
-        let sortField = 'name';
-        let sortAsc = true;
-        let filterText = '';
-        let filterMode = 'all';
-        let eventSource = null;
+    let data = [];
+    let sortKey = 'name';
+    let sortAsc = true;
+    let filter = 'all';
+    let query = '';
+    let es = null;
 
-        // Format bytes to human readable
-        function formatBytes(bytes) {
-            if (bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
+    const fmt = {
+        bytes: n => {
+            if (n === 0) return '0 B';
+            const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(n) / Math.log(1024));
+            return (n / Math.pow(1024, i)).toFixed(2) + ' ' + u[i];
+        },
+        speed: n => fmt.bytes(n) + '/s',
+        ratio: n => n.toFixed(3)
+    };
 
-        // Format speed
-        function formatSpeed(bps) {
-            return formatBytes(bps) + '/s';
-        }
+    const esc = s => {
+        const div = document.createElement('div');
+        div.textContent = String(s || '');
+        return div.innerHTML;
+    };
 
-        // Format ratio
-        function formatRatio(ratio) {
-            return ratio.toFixed(3);
-        }
+    const render = () => {
+        let filtered = data.filter(t => {
+            if (query && !t.name.toLowerCase().includes(query.toLowerCase())) return false;
+            if (filter === 'issue') return t.has_issue;
+            if (filter === 'ok') return !t.has_issue;
+            return true;
+        });
 
-        // Get ratio class
-        function getRatioClass(ratio) {
-            if (ratio >= 1) return 'ratio-good';
-            if (ratio >= 0.5) return 'ratio-medium';
-            return 'ratio-low';
-        }
-
-        // Truncate hash
-        function truncateHash(hash) {
-            return hash.substring(0, 16) + '...';
-        }
-
-        // Escape HTML to prevent XSS
-        function esc(str) {
-            if (str == null) return '';
-            const div = document.createElement('div');
-            div.textContent = String(str);
-            return div.innerHTML;
-        }
-
-        // Get failures badge class
-        function getFailuresClass(failures) {
-            if (failures === 0) return 'ok';
-            if (failures < 3) return 'warning';
-            return 'danger';
-        }
-
-        // Update stats bar
-        function updateStats(data) {
-            const issueCount = data.torrents.filter(t => t.has_issue).length;
-
-            document.getElementById('active-count').textContent = data.torrents.length;
-
-            const issueCountEl = document.getElementById('issue-count');
-            issueCountEl.textContent = issueCount;
-            issueCountEl.className = 'stat-value' + (issueCount > 0 ? ' danger' : '');
-
-            document.getElementById('issue-badge').textContent = issueCount;
-
-            let totalSpeed = 0;
-            let totalUploaded = 0;
-            data.torrents.forEach(t => {
-                totalSpeed += t.speed_bps;
-                totalUploaded += t.uploaded;
-            });
-
-            document.getElementById('total-speed').textContent = formatSpeed(totalSpeed);
-            document.getElementById('total-uploaded').textContent = formatBytes(totalUploaded);
-        }
-
-        // Render table
-        function renderTable() {
-            const tbody = document.getElementById('torrent-list');
-            const emptyState = document.getElementById('empty-state');
-            const tableContainer = document.getElementById('table-container');
-
-            // Apply filters
-            let filtered = torrents.filter(t => {
-                if (filterText && !t.name.toLowerCase().includes(filterText.toLowerCase())) {
-                    return false;
-                }
-                if (filterMode === 'issue' && !t.has_issue) return false;
-                if (filterMode === 'normal' && t.has_issue) return false;
-                return true;
-            });
-
-            // Sort
-            filtered.sort((a, b) => {
-                let valA = a[sortField];
-                let valB = b[sortField];
-                if (typeof valA === 'string') {
-                    valA = valA.toLowerCase();
-                    valB = valB.toLowerCase();
-                }
-                if (valA < valB) return sortAsc ? -1 : 1;
-                if (valA > valB) return sortAsc ? 1 : -1;
-                return 0;
-            });
-
-            if (filtered.length === 0) {
-                tableContainer.style.display = 'none';
-                emptyState.style.display = 'block';
-                const emptyText = document.getElementById('empty-text');
-                const emptyHint = document.getElementById('empty-hint');
-                if (filterMode === 'issue') {
-                    emptyText.textContent = '没有异常种子';
-                    emptyHint.textContent = '所有种子运行正常';
-                } else if (filterMode === 'normal') {
-                    emptyText.textContent = '没有正常种子';
-                    emptyHint.textContent = '所有种子都存在异常';
-                } else if (filterText) {
-                    emptyText.textContent = '没有匹配的种子';
-                    emptyHint.textContent = '尝试其他搜索关键词';
-                } else {
-                    emptyText.textContent = '暂无活跃种子';
-                    emptyHint.textContent = '请将 .torrent 文件放入 torrents 目录';
-                }
-                return;
+        filtered.sort((a, b) => {
+            let va = a[sortKey], vb = b[sortKey];
+            if (typeof va === 'string') {
+                va = va.toLowerCase();
+                vb = vb.toLowerCase();
             }
+            return (va < vb ? -1 : va > vb ? 1 : 0) * (sortAsc ? 1 : -1);
+        });
 
-            tableContainer.style.display = 'block';
-            emptyState.style.display = 'none';
+        const tbody = document.getElementById('tbody');
+        const empty = document.getElementById('empty');
+        const wrapper = document.getElementById('table-wrapper');
 
-            tbody.innerHTML = filtered.map(t => {
-                const statusIcon = t.has_issue
-                    ? '<svg class="issue-icon" viewBox="0 0 24 24" fill="#e74c3c"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>'
-                    : '<svg class="issue-icon" viewBox="0 0 24 24" fill="#27ae60"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>';
-                const tooltip = t.issue_reason
-                    ? `<div class="tooltip">${esc(t.issue_reason)}</div>`
-                    : '';
-
-                return `
-                <tr class="${t.has_issue ? 'row-issue' : ''}">
-                    <td class="hash-cell" title="${esc(t.info_hash)}">${esc(truncateHash(t.info_hash))}</td>
-                    <td class="name-cell" title="${esc(t.name)}">${esc(t.name)}</td>
-                    <td class="number-cell">${formatBytes(t.size)}</td>
-                    <td class="number-cell">${formatBytes(t.uploaded)}</td>
-                    <td class="number-cell speed-cell">${formatSpeed(t.speed_bps)}</td>
-                    <td class="number-cell">${t.seeders}</td>
-                    <td class="number-cell">${t.leechers}</td>
-                    <td class="number-cell ratio-cell ${getRatioClass(t.ratio)}">${formatRatio(t.ratio)}</td>
-                    <td class="number-cell failures-cell">
-                        <span class="failures-badge ${t.has_issue ? (t.failures > 0 ? 'danger' : 'warning') : 'ok'}">
-                            ${statusIcon}
-                            ${t.has_issue ? (t.issue_reason || '异常') : '正常'}
-                        </span>
-                        ${tooltip}
-                    </td>
-                    <td class="tracker-cell" title="${esc(t.tracker_host)}">${esc(t.tracker_host)}</td>
-                </tr>
-                `;
-            }).join('');
-        }
-
-        // Connect to SSE
-        function connectSSE() {
-            if (eventSource) {
-                eventSource.close();
+        if (filtered.length === 0) {
+            wrapper.style.display = 'none';
+            empty.style.display = 'block';
+            const title = document.getElementById('empty-title');
+            const desc = document.getElementById('empty-desc');
+            if (filter === 'issue') {
+                title.textContent = '没有异常种子';
+                desc.textContent = '所有种子运行正常';
+            } else if (filter === 'ok') {
+                title.textContent = '没有正常种子';
+                desc.textContent = '所有种子都存在异常';
+            } else if (query) {
+                title.textContent = '未找到匹配';
+                desc.textContent = '尝试其他关键词';
+            } else {
+                title.textContent = '暂无种子';
+                desc.textContent = '请将 .torrent 文件放入 torrents 目录';
             }
-
-            eventSource = new EventSource('/api/events');
-
-            eventSource.onopen = () => {
-                document.getElementById('status-dot').classList.add('connected');
-                document.getElementById('connection-text').textContent = '已连接';
-            };
-
-            eventSource.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    torrents = data.torrents || [];
-                    updateStats(data);
-                    renderTable();
-                } catch (e) {
-                    console.error('Failed to parse event data:', e);
-                }
-            };
-
-            eventSource.onerror = () => {
-                document.getElementById('status-dot').classList.remove('connected');
-                document.getElementById('connection-text').textContent = '连接断开，正在重连...';
-            };
+            return;
         }
 
-        // Load config
-        async function loadConfig() {
+        wrapper.style.display = 'block';
+        empty.style.display = 'none';
+
+        tbody.innerHTML = filtered.map(t => {
+            const ratioClass = t.ratio >= 1 ? 'text-success' : t.ratio >= 0.5 ? 'text-warning' : 'text-danger';
+            const statusClass = t.has_issue ? (t.failures > 0 ? 'error' : 'warning') : 'ok';
+            const statusText = t.has_issue ? (t.issue_reason || '异常') : '正常';
+            const icon = `<svg class="status-icon" fill="currentColor" viewBox="0 0 20 20">
+                ${t.has_issue
+                    ? '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>'
+                    : '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>'}
+            </svg>`;
+
+            return `<tr class="${t.has_issue ? 'issue' : ''}">
+                <td class="text-mono" title="${esc(t.info_hash)}">${esc(t.info_hash.slice(0, 16))}...</td>
+                <td class="text-truncate" title="${esc(t.name)}">${esc(t.name)}</td>
+                <td class="text-right">${fmt.bytes(t.size)}</td>
+                <td class="text-right">${fmt.bytes(t.uploaded)}</td>
+                <td class="text-right text-success">${fmt.speed(t.speed_bps)}</td>
+                <td class="text-right">${t.seeders}</td>
+                <td class="text-right">${t.leechers}</td>
+                <td class="text-right ${ratioClass}">${fmt.ratio(t.ratio)}</td>
+                <td class="text-right">
+                    <span class="status-badge ${statusClass}" title="${esc(t.issue_reason || '')}">
+                        ${icon}${esc(statusText)}
+                    </span>
+                </td>
+                <td class="tracker" title="${esc(t.tracker_host)}">${esc(t.tracker_host)}</td>
+            </tr>`;
+        }).join('');
+    };
+
+    const update = resp => {
+        data = resp.torrents || [];
+        const issues = data.filter(t => t.has_issue).length;
+        const totalSpeed = data.reduce((s, t) => s + t.speed_bps, 0);
+        const totalUploaded = data.reduce((s, t) => s + t.uploaded, 0);
+
+        document.getElementById('active').textContent = data.length;
+        document.getElementById('issues').textContent = issues;
+        document.getElementById('issues').className = 'stat-value' + (issues > 0 ? ' danger' : '');
+        document.getElementById('speed').textContent = fmt.speed(totalSpeed);
+        document.getElementById('uploaded').textContent = fmt.bytes(totalUploaded);
+        document.getElementById('badge').textContent = issues;
+
+        render();
+    };
+
+    const connect = () => {
+        if (es) es.close();
+        es = new EventSource('/api/events');
+
+        es.onopen = () => {
+            document.getElementById('dot').classList.add('active');
+            document.getElementById('status-text').textContent = '已连接';
+        };
+
+        es.onmessage = e => {
             try {
-                const resp = await fetch('/api/config');
-                const data = await resp.json();
-                const tbody = document.getElementById('config-list');
-                tbody.innerHTML = data.items.map(item => `
-                    <tr>
-                        <td class="config-label">${esc(item.label)}</td>
-                        <td class="config-value">${esc(item.value)}</td>
-                    </tr>
-                `).join('');
-            } catch (e) {
-                console.error('Failed to load config:', e);
+                update(JSON.parse(e.data));
+            } catch (err) {
+                console.error(err);
             }
+        };
+
+        es.onerror = () => {
+            document.getElementById('dot').classList.remove('active');
+            document.getElementById('status-text').textContent = '重连中...';
+        };
+    };
+
+    const loadConfig = async () => {
+        try {
+            const res = await fetch('/api/config');
+            const json = await res.json();
+            document.getElementById('config').innerHTML = json.items.map(item =>
+                `<div class="config-row">
+                    <div class="config-label">${esc(item.label)}</div>
+                    <div class="config-value">${esc(item.value)}</div>
+                </div>`
+            ).join('');
+        } catch (err) {
+            console.error(err);
         }
+    };
 
-        // Config modal
-        document.getElementById('config-btn').addEventListener('click', () => {
-            loadConfig();
-            document.getElementById('config-modal').classList.add('active');
+    // Event listeners
+    document.querySelectorAll('[data-filter]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('[data-filter]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            filter = btn.dataset.filter;
+            render();
         });
+    });
 
-        document.getElementById('modal-close').addEventListener('click', () => {
-            document.getElementById('config-modal').classList.remove('active');
-        });
-
-        document.getElementById('config-modal').addEventListener('click', (e) => {
-            if (e.target === e.currentTarget) {
-                e.currentTarget.classList.remove('active');
+    document.querySelectorAll('[data-sort]').forEach(th => {
+        th.addEventListener('click', () => {
+            const key = th.dataset.sort;
+            if (sortKey === key) {
+                sortAsc = !sortAsc;
+            } else {
+                sortKey = key;
+                sortAsc = true;
             }
+            document.querySelectorAll('th').forEach(t => t.classList.remove('sorted-asc', 'sorted-desc'));
+            th.classList.add(sortAsc ? 'sorted-asc' : 'sorted-desc');
+            render();
         });
+    });
 
-        // Filter mode buttons
-        document.querySelectorAll('.filter-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                filterMode = btn.dataset.filter;
-                renderTable();
-            });
-        });
+    document.getElementById('search').addEventListener('input', e => {
+        query = e.target.value;
+        render();
+    });
 
-        // Sort click handler
-        document.querySelectorAll('th[data-sort]').forEach(th => {
-            th.addEventListener('click', () => {
-                const field = th.dataset.sort;
-                if (sortField === field) {
-                    sortAsc = !sortAsc;
-                } else {
-                    sortField = field;
-                    sortAsc = true;
-                }
+    document.getElementById('config-btn').addEventListener('click', () => {
+        loadConfig();
+        document.getElementById('modal').classList.add('active');
+    });
 
-                document.querySelectorAll('th').forEach(t => {
-                    t.classList.remove('sorted-asc', 'sorted-desc');
-                });
-                th.classList.add(sortAsc ? 'sorted-asc' : 'sorted-desc');
+    document.getElementById('close').addEventListener('click', () => {
+        document.getElementById('modal').classList.remove('active');
+    });
 
-                renderTable();
-            });
-        });
+    document.getElementById('modal').addEventListener('click', e => {
+        if (e.target === e.currentTarget) {
+            e.currentTarget.classList.remove('active');
+        }
+    });
 
-        // Filter input
-        document.getElementById('filter').addEventListener('input', (e) => {
-            filterText = e.target.value;
-            renderTable();
-        });
-
-        // Initialize
-        connectSSE();
+    // Init
+    connect();
     </script>
 </body>
 </html>

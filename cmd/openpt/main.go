@@ -28,7 +28,7 @@ var (
 )
 
 func main() {
-	configPath := flag.String("config", "config.json", "path to OpenPT config file")
+	configPath := flag.String("config", "config.toml", "path to OpenPT config file")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -49,7 +49,7 @@ func main() {
 	}
 	defer closeLog()
 	log.Info("config loaded", "path", *configPath, "torrents_dir", cfg.TorrentsDir, "clients_dir", cfg.ClientsDir, "client", cfg.Client)
-	log.Info("some config changes require restart", "restart_required", "client file, torrents_dir, archive_dir, clients_dir, logging.file, metrics.listen, metrics.path")
+	log.Info("some config changes require restart", "restart_required", "client file, torrents_dir, clients_dir, logging.file, metrics.listen, metrics.path")
 
 	emu, err := clientemu.LoadClient(filepath.Join(cfg.ClientsDir, cfg.Client))
 	if err != nil {
@@ -69,7 +69,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	st := store.New(cfg.TorrentsDir, cfg.ArchiveDir, log)
+	st := store.New(cfg.TorrentsDir, "", log)
 	if err := st.Start(ctx); err != nil {
 		log.Error("failed to start torrent store", "error", err)
 		os.Exit(1)
@@ -102,7 +102,7 @@ func main() {
 		s.UpdateConfig(nextCfg)
 		s.FillSlots(ctx)
 		cfg = nextCfg
-		log.Info("config reloaded", "path", *configPath, "hot_reloaded", "tracker, bandwidth, scheduler, simultaneous_seed, ratio target", "restart_required", "client file, torrents_dir, archive_dir, clients_dir, logging.file, metrics.listen, metrics.path")
+		log.Info("config reloaded", "path", *configPath, "hot_reloaded", "tracker, bandwidth, scheduler, simultaneous_seed, ratio target", "restart_required", "client file, torrents_dir, clients_dir, logging.file, metrics.listen, metrics.path")
 	}
 	log.Info("shutdown requested; sending stopped announces")
 	cancel()

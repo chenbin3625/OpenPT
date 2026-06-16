@@ -22,7 +22,7 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates su-exec tzdata && \
     addgroup -S openpt && \
     adduser -S -G openpt openpt && \
-    mkdir -p /data/torrents/archived /data/clients && \
+    mkdir -p /data/torrents /data/clients && \
     chown -R openpt:openpt /data
 
 WORKDIR /app
@@ -35,4 +35,4 @@ RUN chmod +x /usr/local/bin/openpt-entrypoint
 
 VOLUME ["/data"]
 ENTRYPOINT ["openpt-entrypoint"]
-CMD ["--config", "/data/config.json"]
+CMD ["--config", "/data/config.toml"]

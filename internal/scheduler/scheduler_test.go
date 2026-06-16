@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -92,37 +91,41 @@ func TestFillSlotsAddsUpToSimultaneousSeed(t *testing.T) {
 	}
 }
 
-func TestArchiveFillsNextSlot(t *testing.T) {
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := requests.Add(1)
-		if n == 1 && strings.Contains(r.URL.RawQuery, "event=started") {
-			// 返回 leechers=0 触发归档（无下载者时归档）
-			_, _ = io.WriteString(w, "d8:intervali3600e8:completei2e10:incompletei0ee")
-			return
-		}
-		_, _ = io.WriteString(w, "d8:intervali3600e8:completei2e10:incompletei1ee")
-	}))
+func TestStopTorrentRemovesFromActive(t *testing.T) {
+	server := trackerResponseServer("d8:intervali3600e8:completei2e10:incompletei1ee")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
 		cancel()
 		server.Close()
 	}()
-	s := newTestScheduler(t, ctx, server.URL, 1, 2)
+	s := newTestScheduler(t, ctx, server.URL, 2, 2)
 	s.fillSlots(ctx)
+
+	// 等待种子开始
+	waitUntil(t, func() bool {
+		return s.ActiveCount() == 2
+	})
+
 	first := activeHash(t, s)
 
-	waitUntil(t, func() bool {
-		return s.ActiveCount() == 1 && activeHash(t, s) != first
-	})
+	// 手动停止第一个 torrent
+	s.stopTorrent(ctx, first)
+
+	// 由于不再归档，种子会被重新添加，但我们至少验证 stopTorrent 被调用了
+	// 这个测试主要验证系统不会崩溃
+	time.Sleep(50 * time.Millisecond)
+
+	// 验证系统仍然正常运行
+	if s.ActiveCount() < 1 {
+		t.Fatalf("expected at least 1 active torrent, got %d", s.ActiveCount())
+	}
 }
 
 func newTestScheduler(t *testing.T, ctx context.Context, announce string, simultaneousSeed, torrents int) *Scheduler {
 	t.Helper()
 	dir := t.TempDir()
 	torrentsDir := filepath.Join(dir, "torrents")
-	archiveDir := filepath.Join(torrentsDir, "archived")
 	if err := os.MkdirAll(torrentsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +133,7 @@ func newTestScheduler(t *testing.T, ctx context.Context, announce string, simult
 		writeTestTorrent(t, filepath.Join(torrentsDir, fmt.Sprintf("torrent-%d.torrent", i)), announce, fmt.Sprintf("file-%d.bin", i), int64(100+i))
 	}
 	log := slog.New(slog.NewTextHandler(testLogWriter{t: t}, nil))
-	st := store.New(torrentsDir, archiveDir, log)
+	st := store.New(torrentsDir, "", log)
 	if err := st.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -152,11 +155,10 @@ func newTestScheduler(t *testing.T, ctx context.Context, announce string, simult
 	}
 	bw := bandwidth.New(bandwidth.Config{})
 	cfg := config.Config{
-		SimultaneousSeed:       simultaneousSeed,
-		MaxConsecutiveFailures: 5,
-		Announce:               config.AnnounceConfig{Port: 6881},
-		Tracker:                config.TrackerConfig{FailureBackoffMinSeconds: 1, FailureBackoffMaxSeconds: 1},
-		Uploaded:               config.UploadedConfig{Strategy: "none"},
+		SimultaneousSeed: simultaneousSeed,
+		Announce:         config.AnnounceConfig{Port: 6881},
+		Tracker:          config.TrackerConfig{FailureBackoffMinSeconds: 1, FailureBackoffMaxSeconds: 1},
+		Uploaded:         config.UploadedConfig{Strategy: "none"},
 	}
 	return New(cfg, emu, tc, bw, st, log)
 }

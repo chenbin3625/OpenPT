@@ -28,7 +28,6 @@ type Event struct {
 
 type Store struct {
 	torrentsDir string
-	archiveDir  string
 	log         *slog.Logger
 	mu          sync.RWMutex
 	byPath      map[string]*torrent.Torrent
@@ -38,7 +37,6 @@ type Store struct {
 func New(torrentsDir, archiveDir string, log *slog.Logger) *Store {
 	return &Store{
 		torrentsDir: torrentsDir,
-		archiveDir:  archiveDir,
 		log:         log,
 		byPath:      map[string]*torrent.Torrent{},
 		events:      make(chan Event, 64),
@@ -80,7 +78,7 @@ func (s *Store) List() []*torrent.Torrent {
 }
 
 func (s *Store) Start(ctx context.Context) error {
-	if err := torrent.EnsureDirs(s.torrentsDir, s.archiveDir); err != nil {
+	if err := torrent.EnsureDirs(s.torrentsDir, ""); err != nil {
 		return err
 	}
 	if err := s.scan(); err != nil {
@@ -135,8 +133,8 @@ func (s *Store) scan() error {
 func (s *Store) loadFileQuiet(path string) {
 	t, err := torrent.Load(path)
 	if err != nil {
-		s.log.Warn("invalid torrent archived", "path", path, "reason", err)
-		s.archive(path, err.Error())
+		s.log.Warn("invalid torrent, removing", "path", path, "reason", err)
+		os.Remove(path)
 		return
 	}
 	s.mu.Lock()
@@ -148,8 +146,8 @@ func (s *Store) loadFileQuiet(path string) {
 func (s *Store) loadFile(path string) {
 	t, err := torrent.Load(path)
 	if err != nil {
-		s.log.Warn("invalid torrent archived", "path", path, "reason", err)
-		s.archive(path, err.Error())
+		s.log.Warn("invalid torrent, removing", "path", path, "reason", err)
+		os.Remove(path)
 		return
 	}
 	s.mu.Lock()
@@ -179,31 +177,6 @@ func (s *Store) removeFile(path string) {
 		s.log.Info("torrent removed", "path", path, "info_hash", t.InfoHashHex())
 		s.events <- Event{Type: Removed, Torrent: t}
 	}
-}
-
-func (s *Store) ArchiveByHash(infoHash [20]byte, reason string) {
-	s.mu.RLock()
-	var path string
-	for p, t := range s.byPath {
-		if t.InfoHash == infoHash {
-			path = p
-			break
-		}
-	}
-	s.mu.RUnlock()
-	if path != "" {
-		s.archive(path, reason)
-	}
-}
-
-func (s *Store) archive(path, reason string) {
-	s.removeFile(path)
-	target := filepath.Join(s.archiveDir, filepath.Base(path))
-	if err := os.Rename(path, target); err != nil {
-		s.log.Warn("failed to archive torrent", "path", path, "target", target, "reason", reason, "error", err)
-		return
-	}
-	s.log.Info("torrent archived", "path", path, "target", target, "reason", reason)
 }
 
 func (s *Store) PickNotIn(active map[[20]byte]bool) (*torrent.Torrent, error) {

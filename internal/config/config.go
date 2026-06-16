@@ -1,70 +1,67 @@
 package config
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/BurntSushi/toml"
 )
 
 type Config struct {
-	TorrentsDir                   string         `json:"torrents_dir"`
-	ArchiveDir                    string         `json:"archive_dir"`
-	ClientsDir                    string         `json:"clients_dir"`
-	Client                        string         `json:"client"`
-	SimultaneousSeed              int            `json:"simultaneous_seed"`
-	KeepTorrentWithZeroLeechers   bool           `json:"keep_torrent_with_zero_leechers"`
-	Announce                      AnnounceConfig `json:"announce"`
-	Tracker                       TrackerConfig  `json:"tracker"`
-	Logging                       LoggingConfig  `json:"logging"`
-	Metrics                       MetricsConfig  `json:"metrics"`
-	MaxConsecutiveFailures        int            `json:"max_consecutive_failures"`
-	Uploaded                      UploadedConfig `json:"uploaded"`
-	ScanIntervalSeconds           int            `json:"scan_interval_seconds"`
-	ShutdownStopTimeoutSeconds    int            `json:"shutdown_stop_timeout_seconds"`
-	legacySimultaneousSeed        int
-	legacyKeepTorrentZeroLeechers *bool
+	TorrentsDir                string         `toml:"torrents_dir"`
+	ClientsDir                 string         `toml:"clients_dir"`
+	Client                     string         `toml:"client"`
+	SimultaneousSeed           int            `toml:"simultaneous_seed"`
+	Announce                   AnnounceConfig `toml:"announce"`
+	Tracker                    TrackerConfig  `toml:"tracker"`
+	Logging                    LoggingConfig  `toml:"logging"`
+	Metrics                    MetricsConfig  `toml:"metrics"`
+	Uploaded                   UploadedConfig `toml:"uploaded"`
+	ScanIntervalSeconds        int            `toml:"scan_interval_seconds"`
+	ShutdownStopTimeoutSeconds int            `toml:"shutdown_stop_timeout_seconds"`
 }
 
 type AnnounceConfig struct {
-	Port int    `json:"port"`
-	IP   string `json:"ip"`
-	IPv6 string `json:"ipv6"`
+	Port int    `toml:"port"`
+	IP   string `toml:"ip"`
+	IPv6 string `toml:"ipv6"`
 }
 
 type TrackerConfig struct {
-	TimeoutSeconds           int    `json:"timeout_seconds"`
-	Proxy                    string `json:"proxy"`
-	ReuseConnections         *bool  `json:"reuse_connections"`
-	MaxIdleConns             int    `json:"max_idle_conns"`
-	MaxIdleConnsPerHost      int    `json:"max_idle_conns_per_host"`
-	IdleConnTimeoutSeconds   int    `json:"idle_conn_timeout_seconds"`
-	FailureBackoffMinSeconds int    `json:"failure_backoff_min_seconds"`
-	FailureBackoffMaxSeconds int    `json:"failure_backoff_max_seconds"`
+	TimeoutSeconds           int    `toml:"timeout_seconds"`
+	Proxy                    string `toml:"proxy"`
+	ReuseConnections         *bool  `toml:"reuse_connections"`
+	MaxIdleConns             int    `toml:"max_idle_conns"`
+	MaxIdleConnsPerHost      int    `toml:"max_idle_conns_per_host"`
+	IdleConnTimeoutSeconds   int    `toml:"idle_conn_timeout_seconds"`
+	FailureBackoffMinSeconds int    `toml:"failure_backoff_min_seconds"`
+	FailureBackoffMaxSeconds int    `toml:"failure_backoff_max_seconds"`
 }
 
 type UploadedConfig struct {
-	Strategy             string  `json:"strategy"`
-	ConservativeRateBps  int64   `json:"conservative_rate_bps"`
-	ConfiguredRateBps    int64   `json:"configured_rate_bps"`
-	MinRateBps           int64   `json:"min_rate_bps"`
-	MaxRateBps           int64   `json:"max_rate_bps"`
-	RandomJitterPercent  int     `json:"random_jitter_percent"`
-	RandomRefreshSeconds int     `json:"random_refresh_seconds"`
-	RatioTarget          float64 `json:"ratio_target"`
+	Strategy             string  `toml:"strategy"`
+	ConservativeRateBps  int64   `toml:"conservative_rate_bps"`
+	ConfiguredRateBps    int64   `toml:"configured_rate_bps"`
+	MinRateBps           int64   `toml:"min_rate_bps"`
+	MaxRateBps           int64   `toml:"max_rate_bps"`
+	RandomJitterPercent  int     `toml:"random_jitter_percent"`
+	RandomRefreshSeconds int     `toml:"random_refresh_seconds"`
+	RatioTarget          float64 `toml:"ratio_target"`
 }
 
 type LoggingConfig struct {
-	File string `json:"file"`
+	File string `toml:"file"`
 }
 
 type MetricsConfig struct {
-	Enabled bool   `json:"enabled"`
-	Listen  string `json:"listen"`
-	Path    string `json:"path"`
-	WebUI   bool   `json:"webui"`
+	Enabled bool   `toml:"enabled"`
+	Listen  string `toml:"listen"`
+	Path    string `toml:"path"`
+	WebUI   bool   `toml:"webui"`
 }
 
 func Load(path string) (Config, error) {
@@ -72,52 +69,19 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+
 	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return Config{}, err
-	}
-	var legacy struct {
-		SimultaneousSeed            int      `json:"simultaneousSeed"`
-		KeepTorrentWithZeroLeechers *bool    `json:"keepTorrentWithZeroLeechers"`
-		MinUploadRate               int64    `json:"minUploadRate"`
-		MaxUploadRate               int64    `json:"maxUploadRate"`
-		UploadRatioTarget           *float64 `json:"uploadRatioTarget"`
-	}
-	var modern struct {
-		Uploaded struct {
-			RatioTarget *float64 `json:"ratio_target"`
-		} `json:"uploaded"`
-	}
-	_ = json.Unmarshal(data, &legacy)
-	_ = json.Unmarshal(data, &modern)
-	cfg.legacySimultaneousSeed = legacy.SimultaneousSeed
-	cfg.legacyKeepTorrentZeroLeechers = legacy.KeepTorrentWithZeroLeechers
-	if cfg.SimultaneousSeed == 0 {
-		cfg.SimultaneousSeed = cfg.legacySimultaneousSeed
-	}
-	if cfg.legacyKeepTorrentZeroLeechers != nil {
-		cfg.KeepTorrentWithZeroLeechers = *cfg.legacyKeepTorrentZeroLeechers
-	}
-	if legacy.MinUploadRate > 0 && cfg.Uploaded.MinRateBps == 0 {
-		cfg.Uploaded.MinRateBps = legacy.MinUploadRate * 1000
-	}
-	if legacy.MaxUploadRate > 0 && cfg.Uploaded.MaxRateBps == 0 {
-		cfg.Uploaded.MaxRateBps = legacy.MaxUploadRate * 1000
-	}
-	if cfg.Uploaded.Strategy == "" && (legacy.MaxUploadRate > 0 || legacy.MinUploadRate > 0) {
-		cfg.Uploaded.Strategy = "configured_rate"
-		if legacy.MaxUploadRate > 0 {
-			cfg.Uploaded.ConfiguredRateBps = legacy.MaxUploadRate * 1000
-		} else {
-			cfg.Uploaded.ConfiguredRateBps = legacy.MinUploadRate * 1000
+	// 根据文件扩展名决定解析方式
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".toml" {
+		if err := toml.Unmarshal(data, &cfg); err != nil {
+			return Config{}, err
 		}
+	} else {
+		// 为了向后兼容，仍然支持 JSON 格式（但会输出警告）
+		return Config{}, fmt.Errorf("JSON config format is deprecated, please migrate to TOML format (config.toml)")
 	}
-	if legacy.UploadRatioTarget != nil && modern.Uploaded.RatioTarget == nil {
-		cfg.Uploaded.RatioTarget = *legacy.UploadRatioTarget
-		if cfg.Uploaded.RatioTarget == -1 {
-			cfg.Uploaded.RatioTarget = 0
-		}
-	}
+
 	cfg.applyDefaults(path)
 	return cfg, cfg.Validate()
 }
@@ -127,13 +91,12 @@ func (c *Config) applyDefaults(configPath string) {
 	if c.TorrentsDir == "" {
 		c.TorrentsDir = filepath.Join(root, "torrents")
 	}
-	if c.ArchiveDir == "" {
-		c.ArchiveDir = filepath.Join(c.TorrentsDir, "archived")
-	}
 	if c.ClientsDir == "" {
 		c.ClientsDir = filepath.Join(root, "clients")
 	}
-	if c.SimultaneousSeed == 0 {
+	// simultaneous_seed 可以为 0（暂停所有做种）
+	// 只在负数时才设置默认值
+	if c.SimultaneousSeed < 0 {
 		c.SimultaneousSeed = 1
 	}
 	if c.Announce.Port == 0 {
@@ -160,9 +123,6 @@ func (c *Config) applyDefaults(configPath string) {
 	}
 	if c.Tracker.FailureBackoffMaxSeconds == 0 {
 		c.Tracker.FailureBackoffMaxSeconds = 300
-	}
-	if c.MaxConsecutiveFailures == 0 {
-		c.MaxConsecutiveFailures = 5
 	}
 	if c.Uploaded.Strategy == "" {
 		c.Uploaded.Strategy = "none"
@@ -194,8 +154,8 @@ func (c Config) Validate() error {
 	if c.Client == "" {
 		return errors.New("client is required")
 	}
-	if c.SimultaneousSeed < 1 {
-		return errors.New("simultaneous_seed must be at least 1")
+	if c.SimultaneousSeed < 0 {
+		return errors.New("simultaneous_seed must not be negative")
 	}
 	if c.Announce.Port < 1 || c.Announce.Port > 65535 {
 		return errors.New("announce.port must be in 1..65535")
@@ -217,9 +177,6 @@ func (c Config) Validate() error {
 	}
 	if c.Tracker.FailureBackoffMaxSeconds < c.Tracker.FailureBackoffMinSeconds {
 		return errors.New("tracker.failure_backoff_max_seconds must be greater than or equal to tracker.failure_backoff_min_seconds")
-	}
-	if c.MaxConsecutiveFailures < 1 {
-		return errors.New("max_consecutive_failures must be at least 1")
 	}
 	switch c.Uploaded.Strategy {
 	case "none", "conservative_rate", "configured_rate":

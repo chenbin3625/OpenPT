@@ -1,0 +1,67 @@
+# ============================================
+# OpenPT Docker 配置文件
+# 适用于 Docker 容器环境
+# ============================================
+
+# ========== 核心配置 ==========
+
+# 同时保种的种子数量
+simultaneous_seed = 200
+
+# 客户端模拟文件
+client = "qbittorrent-5.1.4.client"
+
+
+# ========== 上传速度配置 ==========
+[uploaded]
+strategy = "configured_rate"
+configured_rate_bps = 170000
+min_rate_bps = 30000
+max_rate_bps = 170000
+conservative_rate_bps = 1024
+random_jitter_percent = 10
+random_refresh_seconds = 1200
+ratio_target = 0
+
+
+# ========== 目录配置（Docker 容器内路径） ==========
+
+torrents_dir = "/data/torrents"
+clients_dir = "/app/clients"
+
+
+# ========== Announce 配置 ==========
+[announce]
+port = 6881
+ip = ""
+ipv6 = ""
+
+
+# ========== Tracker 配置 ==========
+[tracker]
+timeout_seconds = 15
+proxy = ""
+reuse_connections = true
+max_idle_conns = 100
+max_idle_conns_per_host = 10
+idle_conn_timeout_seconds = 90
+failure_backoff_min_seconds = 5
+failure_backoff_max_seconds = 300
+
+
+# ========== 监控和日志配置 ==========
+[metrics]
+enabled = true
+# Docker 容器内监听所有接口
+listen = "0.0.0.0:9090"
+path = "/metrics"
+webui = true
+
+[logging]
+file = ""
+
+
+# ========== 其他配置 ==========
+
+scan_interval_seconds = 5
+shutdown_stop_timeout_seconds = 20
