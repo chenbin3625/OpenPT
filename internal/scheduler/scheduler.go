@@ -17,6 +17,15 @@ import (
 	"openpt/internal/tracker"
 )
 
+// stopReason 表示种子停止的原因
+type stopReason int
+
+const (
+	StopReasonRemoved     stopReason = iota // 种子文件被删除
+	StopReasonManual                         // 用户手动停止/热重载
+	StopReasonRatioTarget                    // 达到分享率目标
+)
+
 type Result struct {
 	NextEvent clientemu.Event
 	Delay     time.Duration
@@ -95,7 +104,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 				case store.Added:
 					s.fillSlots(ctx)
 				case store.Removed:
-					s.stopTorrent(ctx, ev.Torrent.InfoHash)
+					s.stopTorrent(ctx, ev.Torrent.InfoHash, StopReasonRemoved)
 					// fillSlots 已在 stopTorrent 中调用，不需要重复
 				}
 			}
@@ -189,7 +198,7 @@ func (s *Scheduler) tryAdd(parent context.Context, t *torrent.Torrent) bool {
 	return true
 }
 
-func (s *Scheduler) stopTorrent(ctx context.Context, hash [20]byte) {
+func (s *Scheduler) stopTorrent(ctx context.Context, hash [20]byte, reason stopReason) {
 	a := s.removeActive(hash)
 	if a != nil {
 		s.bw.Unregister(a.torrent.InfoHashHex())
@@ -198,11 +207,21 @@ func (s *Scheduler) stopTorrent(ctx context.Context, hash [20]byte) {
 		// 同步等待 stopped announce 完成
 		s.announce(ctx, a, clientemu.EventStopped)
 	}
-	// 清除已完成标记，允许该种子重新添加
-	s.mu.Lock()
-	delete(s.completed, hash)
-	s.mu.Unlock()
+
+	// 只在非分享率目标原因时清除 completed 标记
+	// 分享率达标的种子应保持 completed 状态，避免重新添加
+	if reason != StopReasonRatioTarget {
+		s.clearCompleted(hash)
+	}
+
 	s.fillSlots(ctx)
+}
+
+// clearCompleted 清除 completed 标记，允许种子重新添加
+func (s *Scheduler) clearCompleted(hash [20]byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.completed, hash)
 }
 
 func (s *Scheduler) removeActive(hash [20]byte) *announcer {
