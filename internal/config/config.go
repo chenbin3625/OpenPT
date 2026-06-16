@@ -106,7 +106,11 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Uploaded.Strategy == "" && (legacy.MaxUploadRate > 0 || legacy.MinUploadRate > 0) {
 		cfg.Uploaded.Strategy = "configured_rate"
-		cfg.Uploaded.ConfiguredRateBps = legacy.MaxUploadRate * 1000
+		if legacy.MaxUploadRate > 0 {
+			cfg.Uploaded.ConfiguredRateBps = legacy.MaxUploadRate * 1000
+		} else {
+			cfg.Uploaded.ConfiguredRateBps = legacy.MinUploadRate * 1000
+		}
 	}
 	if legacy.UploadRatioTarget != nil && modern.Uploaded.RatioTarget == nil {
 		cfg.Uploaded.RatioTarget = *legacy.UploadRatioTarget
