@@ -47,6 +47,28 @@ func New(torrentsDir, archiveDir string, log *slog.Logger) *Store {
 
 func (s *Store) Events() <-chan Event { return s.events }
 
+// TorrentInfo holds basic torrent information for the web UI.
+type TorrentInfo struct {
+	InfoHash string `json:"info_hash"`
+	Name     string `json:"name"`
+	Size     int64  `json:"size"`
+}
+
+// Status returns information about all torrents in the store.
+func (s *Store) Status() []TorrentInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]TorrentInfo, 0, len(s.byPath))
+	for _, t := range s.byPath {
+		out = append(out, TorrentInfo{
+			InfoHash: t.InfoHashHex(),
+			Name:     t.Name,
+			Size:     t.Size,
+		})
+	}
+	return out
+}
+
 func (s *Store) List() []*torrent.Torrent {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

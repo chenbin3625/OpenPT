@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenPT - 种子状态监控</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px 0;
+            margin-bottom: 20px;
+        }
+        header h1 {
+            font-size: 24px;
+            font-weight: 500;
+        }
+        .stats-bar {
+            display: flex;
+            gap: 30px;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .stat-label {
+            opacity: 0.8;
+        }
+        .stat-value {
+            font-weight: 600;
+            font-size: 18px;
+        }
+        .stat-value.warning {
+            color: #f39c12;
+        }
+        .stat-value.danger {
+            color: #e74c3c;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .filter-group {
+            display: flex;
+            gap: 4px;
+        }
+        .filter-btn {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .filter-btn:hover {
+            background: #f8f9fa;
+        }
+        .filter-btn.active {
+            background: #3498db;
+            color: white;
+            border-color: #3498db;
+        }
+        .filter-btn .badge {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 10px;
+            font-size: 11px;
+            margin-left: 4px;
+        }
+        .filter-btn .badge.danger {
+            background: #e74c3c;
+            color: white;
+        }
+        .filter-input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 200px;
+        }
+        .filter-input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th {
+            background: #f8f9fa;
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 13px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+        }
+        th:hover {
+            background: #e9ecef;
+        }
+        th.sorted-asc::after { content: " ▲"; }
+        th.sorted-desc::after { content: " ▼"; }
+        td {
+            padding: 12px 16px;
+            border-top: 1px solid #eee;
+            font-size: 14px;
+        }
+        tr:hover td {
+            background: #f8f9fa;
+        }
+        tr.row-issue td {
+            background: #fff5f5;
+        }
+        tr.row-issue:hover td {
+            background: #ffe8e8;
+        }
+        .hash-cell {
+            font-family: monospace;
+            font-size: 12px;
+            color: #666;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .name-cell {
+            max-width: 350px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .number-cell {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        .speed-cell {
+            color: #27ae60;
+            font-weight: 500;
+        }
+        .ratio-cell {
+            font-weight: 500;
+        }
+        .ratio-good { color: #27ae60; }
+        .ratio-medium { color: #f39c12; }
+        .ratio-low { color: #e74c3c; }
+        .failures-cell {
+            text-align: center;
+        }
+        .failures-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .failures-badge.ok {
+            background: #e8f5e9;
+            color: #27ae60;
+        }
+        .failures-badge.warning {
+            background: #fff3e0;
+            color: #f39c12;
+        }
+        .failures-badge.danger {
+            background: #ffebee;
+            color: #e74c3c;
+        }
+        .empty-state {
+            padding: 60px 20px;
+            text-align: center;
+            color: #999;
+        }
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #e74c3c;
+        }
+        .status-dot.connected {
+            background: #27ae60;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .tracker-cell {
+            font-size: 12px;
+            color: #666;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        @media (max-width: 768px) {
+            .container { padding: 10px; }
+            .stats-bar { flex-wrap: wrap; gap: 15px; }
+            .filter-input { width: 100%; }
+            td, th { padding: 8px 12px; }
+            .hash-cell, .tracker-cell { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>OpenPT 种子状态监控</h1>
+            <div class="stats-bar">
+                <div class="stat-item">
+                    <span class="stat-label">活跃种子:</span>
+                    <span class="stat-value" id="active-count">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">异常种子:</span>
+                    <span class="stat-value" id="issue-count">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">总上传速度:</span>
+                    <span class="stat-value" id="total-speed">0 B/s</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">总上传量:</span>
+                    <span class="stat-value" id="total-uploaded">0 B</span>
+                </div>
+                <div class="stat-item">
+                    <div class="connection-status">
+                        <span class="status-dot" id="status-dot"></span>
+                        <span id="connection-text">连接中...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">种子列表</span>
+                <div class="toolbar">
+                    <div class="filter-group">
+                        <button class="filter-btn active" data-filter="all">全部</button>
+                        <button class="filter-btn" data-filter="issue">异常 <span class="badge danger" id="issue-badge">0</span></button>
+                        <button class="filter-btn" data-filter="normal">正常</button>
+                    </div>
+                    <input type="text" class="filter-input" id="filter" placeholder="搜索种子名称...">
+                </div>
+            </div>
+            <div id="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th data-sort="info_hash">Info Hash</th>
+                            <th data-sort="name">名称</th>
+                            <th data-sort="size" class="number-cell">大小</th>
+                            <th data-sort="uploaded" class="number-cell">已上传</th>
+                            <th data-sort="speed_bps" class="number-cell">速度</th>
+                            <th data-sort="seeders" class="number-cell">做种</th>
+                            <th data-sort="leechers" class="number-cell">下载</th>
+                            <th data-sort="ratio" class="number-cell">分享率</th>
+                            <th data-sort="failures" class="number-cell">失败</th>
+                            <th data-sort="tracker_host">Tracker</th>
+                        </tr>
+                    </thead>
+                    <tbody id="torrent-list">
+                    </tbody>
+                </table>
+            </div>
+            <div class="empty-state" id="empty-state" style="display: none;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <p id="empty-text">暂无活跃种子</p>
+                <p style="font-size: 14px; margin-top: 8px;" id="empty-hint">请将 .torrent 文件放入 torrents 目录</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let torrents = [];
+        let sortField = 'name';
+        let sortAsc = true;
+        let filterText = '';
+        let filterMode = 'all'; // all, issue, normal
+        let eventSource = null;
+
+        // Format bytes to human readable
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // Format speed
+        function formatSpeed(bps) {
+            return formatBytes(bps) + '/s';
+        }
+
+        // Format ratio
+        function formatRatio(ratio) {
+            return ratio.toFixed(3);
+        }
+
+        // Get ratio class
+        function getRatioClass(ratio) {
+            if (ratio >= 1) return 'ratio-good';
+            if (ratio >= 0.5) return 'ratio-medium';
+            return 'ratio-low';
+        }
+
+        // Truncate hash
+        function truncateHash(hash) {
+            return hash.substring(0, 16) + '...';
+        }
+
+        // Get failures badge class
+        function getFailuresClass(failures) {
+            if (failures === 0) return 'ok';
+            if (failures < 3) return 'warning';
+            return 'danger';
+        }
+
+        // Update stats bar
+        function updateStats(data) {
+            const issueCount = data.torrents.filter(t => t.has_issue).length;
+
+            document.getElementById('active-count').textContent = data.torrents.length;
+
+            const issueCountEl = document.getElementById('issue-count');
+            issueCountEl.textContent = issueCount;
+            issueCountEl.className = 'stat-value' + (issueCount > 0 ? ' danger' : '');
+
+            document.getElementById('issue-badge').textContent = issueCount;
+
+            let totalSpeed = 0;
+            let totalUploaded = 0;
+            data.torrents.forEach(t => {
+                totalSpeed += t.speed_bps;
+                totalUploaded += t.uploaded;
+            });
+
+            document.getElementById('total-speed').textContent = formatSpeed(totalSpeed);
+            document.getElementById('total-uploaded').textContent = formatBytes(totalUploaded);
+        }
+
+        // Render table
+        function renderTable() {
+            const tbody = document.getElementById('torrent-list');
+            const emptyState = document.getElementById('empty-state');
+            const tableContainer = document.getElementById('table-container');
+
+            // Apply filters
+            let filtered = torrents.filter(t => {
+                // Text filter
+                if (filterText && !t.name.toLowerCase().includes(filterText.toLowerCase())) {
+                    return false;
+                }
+                // Mode filter
+                if (filterMode === 'issue' && !t.has_issue) return false;
+                if (filterMode === 'normal' && t.has_issue) return false;
+                return true;
+            });
+
+            // Sort
+            filtered.sort((a, b) => {
+                let valA = a[sortField];
+                let valB = b[sortField];
+                if (typeof valA === 'string') {
+                    valA = valA.toLowerCase();
+                    valB = valB.toLowerCase();
+                }
+                if (valA < valB) return sortAsc ? -1 : 1;
+                if (valA > valB) return sortAsc ? 1 : -1;
+                return 0;
+            });
+
+            if (filtered.length === 0) {
+                tableContainer.style.display = 'none';
+                emptyState.style.display = 'block';
+                const emptyText = document.getElementById('empty-text');
+                const emptyHint = document.getElementById('empty-hint');
+                if (filterMode === 'issue') {
+                    emptyText.textContent = '没有异常种子';
+                    emptyHint.textContent = '所有种子运行正常';
+                } else if (filterMode === 'normal') {
+                    emptyText.textContent = '没有正常种子';
+                    emptyHint.textContent = '所有种子都存在异常';
+                } else if (filterText) {
+                    emptyText.textContent = '没有匹配的种子';
+                    emptyHint.textContent = '尝试其他搜索关键词';
+                } else {
+                    emptyText.textContent = '暂无活跃种子';
+                    emptyHint.textContent = '请将 .torrent 文件放入 torrents 目录';
+                }
+                return;
+            }
+
+            tableContainer.style.display = 'block';
+            emptyState.style.display = 'none';
+
+            tbody.innerHTML = filtered.map(t => `
+                <tr class="${t.has_issue ? 'row-issue' : ''}">
+                    <td class="hash-cell" title="${t.info_hash}">${truncateHash(t.info_hash)}</td>
+                    <td class="name-cell" title="${t.name}">${t.name}</td>
+                    <td class="number-cell">${formatBytes(t.size)}</td>
+                    <td class="number-cell">${formatBytes(t.uploaded)}</td>
+                    <td class="number-cell speed-cell">${formatSpeed(t.speed_bps)}</td>
+                    <td class="number-cell">${t.seeders}</td>
+                    <td class="number-cell">${t.leechers}</td>
+                    <td class="number-cell ratio-cell ${getRatioClass(t.ratio)}">${formatRatio(t.ratio)}</td>
+                    <td class="number-cell failures-cell">
+                        <span class="failures-badge ${getFailuresClass(t.failures)}">${t.failures}</span>
+                    </td>
+                    <td class="tracker-cell" title="${t.tracker_host}">${t.tracker_host}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Connect to SSE
+        function connectSSE() {
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            eventSource = new EventSource('/api/events');
+
+            eventSource.onopen = () => {
+                document.getElementById('status-dot').classList.add('connected');
+                document.getElementById('connection-text').textContent = '已连接';
+            };
+
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    torrents = data.torrents || [];
+                    updateStats(data);
+                    renderTable();
+                } catch (e) {
+                    console.error('Failed to parse event data:', e);
+                }
+            };
+
+            eventSource.onerror = () => {
+                document.getElementById('status-dot').classList.remove('connected');
+                document.getElementById('connection-text').textContent = '连接断开，正在重连...';
+            };
+        }
+
+        // Filter mode buttons
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                filterMode = btn.dataset.filter;
+                renderTable();
+            });
+        });
+
+        // Sort click handler
+        document.querySelectorAll('th[data-sort]').forEach(th => {
+            th.addEventListener('click', () => {
+                const field = th.dataset.sort;
+                if (sortField === field) {
+                    sortAsc = !sortAsc;
+                } else {
+                    sortField = field;
+                    sortAsc = true;
+                }
+
+                // Update sort indicators
+                document.querySelectorAll('th').forEach(t => {
+                    t.classList.remove('sorted-asc', 'sorted-desc');
+                });
+                th.classList.add(sortAsc ? 'sorted-asc' : 'sorted-desc');
+
+                renderTable();
+            });
+        });
+
+        // Filter input
+        document.getElementById('filter').addEventListener('input', (e) => {
+            filterText = e.target.value;
+            renderTable();
+        });
+
+        // Initialize
+        connectSSE();
+    </script>
+</body>
+</html>
