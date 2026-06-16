@@ -2,7 +2,7 @@
   "torrents_dir": "./torrents",
   "archive_dir": "./torrents/archived",
   "clients_dir": "./clients",
-  "client": "qbittorrent-4.6.7.client",
+  "client": "qbittorrent-5.1.4.client",
   "simultaneous_seed": 50,
   "keep_torrent_with_zero_leechers": true,
   "announce": {
