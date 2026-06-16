@@ -621,7 +621,21 @@
         tbody.innerHTML = filtered.map(t => {
             const ratioClass = t.ratio >= 1 ? 'text-success' : t.ratio >= 0.5 ? 'text-warning' : 'text-danger';
             const statusClass = t.has_issue ? (t.failures > 0 ? 'error' : 'warning') : 'ok';
-            const statusText = t.has_issue ? (t.issue_reason || '异常') : '正常';
+
+            // 简化状态文本显示
+            let statusText = '正常';
+            let hoverText = '';
+
+            if (t.has_issue) {
+                if (t.failures > 0) {
+                    statusText = '失败';
+                    hoverText = t.issue_reason || `连续失败 ${t.failures} 次`;
+                } else {
+                    statusText = '异常';
+                    hoverText = t.issue_reason || '异常';
+                }
+            }
+
             const icon = `<svg class="status-icon" fill="currentColor" viewBox="0 0 20 20">
                 ${t.has_issue
                     ? '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>'
@@ -638,7 +652,7 @@
                 <td class="text-right">${t.leechers}</td>
                 <td class="text-right ${ratioClass}">${fmt.ratio(t.ratio)}</td>
                 <td class="text-right">
-                    <span class="status-badge ${statusClass}" title="${esc(t.issue_reason || '')}">
+                    <span class="status-badge ${statusClass}" title="${esc(hoverText)}">
                         ${icon}${esc(statusText)}
                     </span>
                 </td>
