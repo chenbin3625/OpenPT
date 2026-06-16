@@ -6,62 +6,94 @@ import (
 	"testing"
 )
 
-func TestLoadLegacyUploadRatioTargetDisabled(t *testing.T) {
-	cfg := loadConfigJSON(t, `{"client":"qbittorrent.client","uploadRatioTarget":-1}`)
-	if cfg.Uploaded.RatioTarget != 0 {
-		t.Fatalf("ratio target = %v, want disabled 0", cfg.Uploaded.RatioTarget)
+func TestLoadBasicTOML(t *testing.T) {
+	cfg := loadConfigTOML(t, `
+client = "qbittorrent.client"
+simultaneous_seed = 100
+
+[uploaded]
+strategy = "configured_rate"
+configured_rate_bps = 170000
+ratio_target = 0
+`)
+	if cfg.Client != "qbittorrent.client" {
+		t.Fatalf("client = %q, want qbittorrent.client", cfg.Client)
+	}
+	if cfg.SimultaneousSeed != 100 {
+		t.Fatalf("simultaneous_seed = %d, want 100", cfg.SimultaneousSeed)
+	}
+	if cfg.Uploaded.Strategy != "configured_rate" {
+		t.Fatalf("strategy = %q, want configured_rate", cfg.Uploaded.Strategy)
+	}
+	if cfg.Uploaded.ConfiguredRateBps != 170000 {
+		t.Fatalf("configured_rate_bps = %d, want 170000", cfg.Uploaded.ConfiguredRateBps)
 	}
 }
 
-func TestLoadLegacyUploadRatioTarget(t *testing.T) {
-	cfg := loadConfigJSON(t, `{"client":"qbittorrent.client","uploadRatioTarget":1.5}`)
+func TestLoadRatioTarget(t *testing.T) {
+	cfg := loadConfigTOML(t, `
+client = "qbittorrent.client"
+
+[uploaded]
+ratio_target = 1.5
+`)
 	if cfg.Uploaded.RatioTarget != 1.5 {
 		t.Fatalf("ratio target = %v, want 1.5", cfg.Uploaded.RatioTarget)
 	}
 }
 
-func TestModernRatioTargetOverridesLegacy(t *testing.T) {
-	cfg := loadConfigJSON(t, `{"client":"qbittorrent.client","uploadRatioTarget":1.5,"uploaded":{"ratio_target":0}}`)
-	if cfg.Uploaded.RatioTarget != 0 {
-		t.Fatalf("ratio target = %v, want modern value 0", cfg.Uploaded.RatioTarget)
-	}
-}
+func TestInvalidRatioTargetFails(t *testing.T) {
+	path := writeConfigTOML(t, `
+client = "qbittorrent.client"
 
-func TestInvalidLegacyUploadRatioTargetFails(t *testing.T) {
-	path := writeConfigJSON(t, `{"client":"qbittorrent.client","uploadRatioTarget":-2}`)
+[uploaded]
+ratio_target = -2
+`)
 	if _, err := Load(path); err == nil {
-		t.Fatal("expected invalid legacy uploadRatioTarget to fail")
+		t.Fatal("expected invalid ratio_target to fail")
 	}
 }
 
-func TestLegacyMinUploadRateOnlyMigration(t *testing.T) {
-	// 验证旧配置仅设 minUploadRate 未设 maxUploadRate 时，ConfiguredRateBps 不为 0
-	cfg := loadConfigJSON(t, `{"client":"qbittorrent.client","minUploadRate":500}`)
-	if cfg.Uploaded.Strategy != "configured_rate" {
-		t.Fatalf("strategy = %q, want configured_rate", cfg.Uploaded.Strategy)
+func TestDefaultValues(t *testing.T) {
+	cfg := loadConfigTOML(t, `client = "qbittorrent.client"`)
+
+	// 未设置时默认为 0，不会自动设为 1
+	if cfg.SimultaneousSeed != 0 {
+		t.Fatalf("default simultaneous_seed = %d, want 0", cfg.SimultaneousSeed)
 	}
-	if cfg.Uploaded.ConfiguredRateBps != 500*1000 {
-		t.Fatalf("ConfiguredRateBps = %d, want %d", cfg.Uploaded.ConfiguredRateBps, 500*1000)
+	if cfg.Announce.Port != 6881 {
+		t.Fatalf("default announce.port = %d, want 6881", cfg.Announce.Port)
 	}
-	if cfg.Uploaded.MinRateBps != 500*1000 {
-		t.Fatalf("MinRateBps = %d, want %d", cfg.Uploaded.MinRateBps, 500*1000)
+	if cfg.Uploaded.Strategy != "none" {
+		t.Fatalf("default uploaded.strategy = %q, want none", cfg.Uploaded.Strategy)
 	}
 }
 
-func loadConfigJSON(t *testing.T, data string) Config {
+func TestJSONFormatDeprecated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"client":"qbittorrent.client"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected JSON format to be rejected")
+	}
+}
+
+func loadConfigTOML(t *testing.T, data string) Config {
 	t.Helper()
-	cfg, err := Load(writeConfigJSON(t, data))
+	cfg, err := Load(writeConfigTOML(t, data))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return cfg
 }
 
-func writeConfigJSON(t *testing.T, data string) string {
+func writeConfigTOML(t *testing.T, data string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.json")
+	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return path
 }
+

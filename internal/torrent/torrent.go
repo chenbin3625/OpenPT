@@ -57,7 +57,7 @@ func EnsureDirs(torrentsDir, archiveDir string) error {
 	if err := os.MkdirAll(torrentsDir, 0o755); err != nil {
 		return err
 	}
-	return os.MkdirAll(archiveDir, 0o755)
+	return nil
 }
 
 func IsTorrentPath(path string) bool {

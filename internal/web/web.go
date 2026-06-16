@@ -89,12 +89,9 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 	items := []ConfigItem{
 		{Key: "torrents_dir", Label: "种子目录", Value: h.cfg.TorrentsDir},
-		{Key: "archive_dir", Label: "归档目录", Value: h.cfg.ArchiveDir},
 		{Key: "clients_dir", Label: "客户端配置目录", Value: h.cfg.ClientsDir},
 		{Key: "client", Label: "客户端伪装", Value: h.cfg.Client},
 		{Key: "simultaneous_seed", Label: "同时保种数量", Value: fmt.Sprintf("%d", h.cfg.SimultaneousSeed)},
-		{Key: "keep_torrent_with_zero_leechers", Label: "保留无下载者的种子", Value: boolToStr(h.cfg.KeepTorrentWithZeroLeechers)},
-		{Key: "max_consecutive_failures", Label: "最大连续失败次数", Value: fmt.Sprintf("%d", h.cfg.MaxConsecutiveFailures)},
 		{Key: "announce.port", Label: "Announce 端口", Value: fmt.Sprintf("%d", h.cfg.Announce.Port)},
 		{Key: "announce.ip", Label: "上报 IPv4 地址", Value: defaultStr(h.cfg.Announce.IP, "自动检测")},
 		{Key: "announce.ipv6", Label: "上报 IPv6 地址", Value: defaultStr(h.cfg.Announce.IPv6, "自动检测")},

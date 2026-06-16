@@ -1,0 +1,152 @@
+# ============================================
+# OpenPT 配置文件
+# ============================================
+
+# ========== 核心配置（常用） ==========
+
+# 同时保种的种子数量
+# 建议根据你的带宽和 CPU 性能调整，一般 100-500 为宜
+# 设置为 0 可以暂停所有做种
+simultaneous_seed = 200
+
+# 客户端模拟文件
+# 从 clients_dir 目录中选择一个客户端配置文件
+# 例如：qbittorrent-5.1.4.client, transmission-4.0.6.client 等
+client = "qbittorrent-5.1.4.client"
+
+
+# ========== 上传速度配置 ==========
+[uploaded]
+# 上传策略（必填）
+# - "none": 不模拟上传（显示为 0）
+# - "conservative_rate": 保守速率（适合新手，使用 conservative_rate_bps）
+# - "configured_rate": 自定义速率（推荐，使用 configured_rate_bps）
+strategy = "configured_rate"
+
+# 自定义上传速率（单位：字节/秒，Bytes per second）
+# 170000 字节/秒 ≈ 166 KB/s ≈ 1.3 Mbps
+# 计算公式：目标速度(KB/s) × 1024 = configured_rate_bps
+configured_rate_bps = 170000
+
+# 最小上传速率（字节/秒）
+# 30000 字节/秒 ≈ 29 KB/s
+min_rate_bps = 30000
+
+# 最大上传速率（字节/秒）
+# 170000 字节/秒 ≈ 166 KB/s
+max_rate_bps = 170000
+
+# 保守上传速率（仅在 strategy = "conservative_rate" 时生效）
+# 1024 字节/秒 = 1 KB/s
+conservative_rate_bps = 1024
+
+# 随机抖动百分比（0-100）
+# 为上传速率添加随机波动，使其更真实
+# 10 表示在配置速率的 ±10% 范围内波动
+random_jitter_percent = 10
+
+# 随机速率刷新间隔（秒）
+# 每隔多少秒重新生成一个随机速率
+# 1200 秒 = 20 分钟
+random_refresh_seconds = 1200
+
+# 分享率目标
+# 0: 永不停止（推荐）
+# 1.0: 达到 1.0 分享率后停止
+# 2.0: 达到 2.0 分享率后停止
+ratio_target = 0
+
+
+# ========== 目录配置 ==========
+
+# 种子文件目录
+# 所有要保种的 .torrent 文件放在这里
+torrents_dir = "./torrents"
+
+# 客户端配置文件目录
+# 存放 BitTorrent 客户端模拟配置文件（.client 文件）
+clients_dir = "./clients"
+
+
+# ========== Announce 配置 ==========
+[announce]
+# 向 Tracker 汇报的端口号（1-65535）
+# 大多数 PT 站不验证端口真实性，使用默认值即可
+port = 6881
+
+# 向 Tracker 汇报的 IPv4 地址（可选）
+# 留空表示让 Tracker 自动检测
+# 如果需要指定，格式如：ip = "192.168.1.100"
+ip = ""
+
+# 向 Tracker 汇报的 IPv6 地址（可选）
+# 留空表示不使用 IPv6
+ipv6 = ""
+
+
+# ========== Tracker 配置 ==========
+[tracker]
+# Tracker 请求超时时间（秒）
+timeout_seconds = 15
+
+# HTTP 代理地址（可选）
+# 格式：http://host:port 或 socks5://host:port
+# 留空表示不使用代理
+proxy = ""
+
+# 是否复用 HTTP 连接（推荐开启）
+# true: 连接池模式，提高性能
+# false: 每次请求新建连接
+reuse_connections = true
+
+# 最大空闲连接数
+max_idle_conns = 100
+
+# 每个 Host 的最大空闲连接数
+max_idle_conns_per_host = 10
+
+# 空闲连接超时时间（秒）
+idle_conn_timeout_seconds = 90
+
+# Tracker 请求失败后的最小退避时间（秒）
+# 失败后会使用指数退避策略，从此值开始
+failure_backoff_min_seconds = 5
+
+# Tracker 请求失败后的最大退避时间（秒）
+# 退避时间最多增长到此值
+failure_backoff_max_seconds = 300
+
+
+# ========== 监控和日志配置 ==========
+[metrics]
+# 是否启用监控和 Web UI
+enabled = true
+
+# 监控服务监听地址
+# 127.0.0.1: 仅本机访问
+# 0.0.0.0: 允许外部访问（注意安全）
+listen = "127.0.0.1:9090"
+
+# Prometheus 指标路径
+path = "/metrics"
+
+# 是否启用 Web UI 界面
+# true: 可以通过浏览器访问 http://127.0.0.1:9090 查看状态
+webui = true
+
+[logging]
+# 日志输出文件（可选）
+# 留空表示输出到标准输出（stdout）
+# 如果需要记录到文件，格式如：file = "./logs/openpt.log"
+file = ""
+
+
+# ========== 其他高级配置 ==========
+
+# 种子文件扫描间隔（秒）
+# 每隔多少秒扫描一次 torrents_dir 目录，检测新增/删除的种子
+scan_interval_seconds = 5
+
+# 程序关闭时等待 Tracker 停止汇报的超时时间（秒）
+# 程序退出时会向所有 Tracker 发送 stopped 事件
+shutdown_stop_timeout_seconds = 20

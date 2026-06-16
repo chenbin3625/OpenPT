@@ -1,242 +1,256 @@
 # OpenPT
 
-OpenPT 是一个无 WebUI、完全配置驱动的 tracker announce 程序，用于让已有 `.torrent` 以完整 seeder 身份定期向 tracker 汇报状态。
+OpenPT 是一个轻量级、配置驱动的 BitTorrent Tracker Announce 工具，专为 PT 站保种设计。
 
-默认行为偏保守：`left=0`，`downloaded=0`，`uploaded` 默认不增长。上传量统计可以通过配置关闭，也可以按低速或配置速率策略累计；启用上传统计后支持随机速率、按 peers 权重分配带宽和 ratio target 自动完成。
+## 核心特性
 
-## 功能
+### 🚀 智能做种管理
+- **自动失败处理**：连续失败 10 次后自动停止损坏的种子，释放槽位
+- **分享率控制**：达到目标分享率后自动停止，避免过度上传
+- **槽位自动填充**：种子停止后立即填充新种子，保持满载运行
+- **热配置重载**：`SIGHUP` 信号热重载配置，无需重启
 
-- 可选 WebUI，实时查看种子状态和统计信息
-- 支持 HTTP/HTTPS tracker announce
-- 支持 `started`、regular、`stopped` announce 流程
-- 自动解析 `.torrent` 的 tracker、名称、大小和 `info_hash`
-- 扫描并监听 torrent 目录，新增 `.torrent` 后自动加载
-- 无效 torrent 会移动到 archive 目录
-- 收到 `SIGINT` 或 `SIGTERM` 时优雅退出，并发送 `stopped`
-- 支持同时保种数量限制，并在归档、停止或热更新调大并发后自动补位
-- 支持 tracker 超时、代理和最大连续失败次数配置
-- 支持 tracker 连接池复用和失败指数退避
-- 支持上传量策略：`none`、`conservative_rate`、`configured_rate`
-- 支持基于 tracker 返回的 seeders/leechers 做上传带宽权重分配
-- 支持 `ratio_target`，达到目标分享率后自动发送 `stopped` 并归档
-- 支持可选文件日志、SIGHUP 配置热更新和 Prometheus 文本指标
-- 内置多种客户端伪装配置，位于 `clients/` 目录
+### 📊 实时监控面板
+- **SSE 实时更新**：种子状态、速度、分享率实时刷新
+- **异常检测**：自动标记失败和无 peer 的种子
+- **搜索过滤**：按名称搜索，按状态筛选
+- **配置查看**：Web UI 查看当前运行配置
 
-## 使用方法
+### 🔧 灵活配置
+- **TOML 格式**：简洁易读，支持中文注释
+- **客户端伪装**：内置多种 BitTorrent 客户端配置
+- **上传策略**：`none`、`conservative_rate`、`configured_rate` 三种模式
+- **智能带宽分配**：根据 peers 数量动态分配上传速度
 
-从 Release 下载对应系统的压缩包，解压后进入目录。
-
-## 配置说明
-
-### 基础配置
-
-| 配置项 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `torrents_dir` | string | `"./torrents"` | 放置 `.torrent` 文件的目录，新增 torrent 会自动加载 |
-| `archive_dir` | string | `"./torrents/archived"` | 无效或归档 torrent 的移动目录 |
-| `clients_dir` | string | `"./clients"` | 客户端伪装配置文件目录 |
-| `client` | string | `qbittorrent-5.1.4.client` | 要使用的客户端配置文件名 |
-| `simultaneous_seed` | int | `200` | 同时保种的最大数量，调大时自动补满槽位 |
-| `keep_torrent_with_zero_leechers` | bool | `true` | 是否保留无 leecher 的 torrent；`false` 时 seeders 或 leechers 为 0 即归档 |
-| `scan_interval_seconds` | int | `5` | 扫描 torrent 目录的间隔（秒） |
-| `shutdown_stop_timeout_seconds` | int | `20` | 优雅退出时等待 stopped announce 的超时（秒） |
-| `max_consecutive_failures` | int | `5` | 最大连续 announce 失败次数，达到后归档 torrent |
-
-### Announce 配置
-
-| 配置项 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `announce.port` | int | `6881` | announce 上报端口，范围 1-65535 |
-| `announce.ip` | string | `""` | 强制上报的 IPv4 地址，留空自动检测 |
-| `announce.ipv6` | string | `""` | 强制上报的 IPv6 地址，留空自动检测 |
-
-### Tracker 配置
-
-| 配置项 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `tracker.timeout_seconds` | int | `15` | tracker HTTP 请求超时（秒） |
-| `tracker.proxy` | string | `""` | HTTP/HTTPS 代理地址，如 `http://127.0.0.1:7890`，留空直连 |
-| `tracker.reuse_connections` | bool | `true` | 是否复用 HTTP 连接池 |
-| `tracker.max_idle_conns` | int | `100` | 最大空闲连接数 |
-| `tracker.max_idle_conns_per_host` | int | `10` | 每个 host 最大空闲连接数 |
-| `tracker.idle_conn_timeout_seconds` | int | `90` | 空闲连接超时（秒） |
-| `tracker.failure_backoff_min_seconds` | int | `5` | 失败退避最小等待时间（秒） |
-| `tracker.failure_backoff_max_seconds` | int | `300` | 失败退避最大等待时间（秒） |
-
-### 上传策略配置
-
-| 配置项 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `uploaded.strategy` | string | `"configured_rate"` | 上传量策略：`none`、`conservative_rate`、`configured_rate` |
-| `uploaded.conservative_rate_bps` | int64 | `1024` | `conservative_rate` 策略的上传速率（字节/秒） |
-| `uploaded.configured_rate_bps` | int64 | `170000` | `configured_rate` 策略的上传速率（字节/秒） |
-| `uploaded.min_rate_bps` | int64 | `30000` | 全局上传速率随机区间最小值（字节/秒），`0` 表示不启用 |
-| `uploaded.max_rate_bps` | int64 | `170000` | 全局上传速率随机区间最大值（字节/秒），`> 0` 时启用随机速率 |
-| `uploaded.random_jitter_percent` | int | `10` | 未配置随机区间时，围绕配置速率的上下浮动百分比（0-100） |
-| `uploaded.random_refresh_seconds` | int | `1200` | 随机速率刷新间隔（秒），默认 20 分钟 |
-| `uploaded.ratio_target` | float64 | `0` | 目标分享率，达到后自动 stopped 并归档；`0` 表示禁用 |
-
-### 日志配置
-
-| 配置项 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `logging.file` | string | `""` | 文件日志路径，留空仅输出到 stdout |
-
-### Prometheus 指标配置
-
-| 配置项 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `metrics.enabled` | bool | `true` | 是否启用 Prometheus 指标端点 |
-| `metrics.listen` | string | `"127.0.0.1:9090"` | 指标服务监听地址 |
-| `metrics.path` | string | `"/metrics"` | 指标 HTTP 路径 |
-| `metrics.webui` | bool | `true` | 是否启用 Web UI（需要 `metrics.enabled` 为 `true`） |
-
-### Web UI
-
-启用 Web UI 后，访问 `http://<metrics.listen>/` 即可查看实时种子状态。
-
-功能：
-- 实时显示所有活跃种子的状态（SSE 自动刷新）
-- 显示种子名称、大小、已上传量、速度、做种数/下载数、分享率
-- 全局统计：活跃种子数、总上传速度、总上传量
-- 支持按名称搜索过滤
-- 支持点击表头排序
-
-### 完整配置示例
-
-```json
-{
-  "torrents_dir": "./torrents",
-  "archive_dir": "./torrents/archived",
-  "clients_dir": "./clients",
-  "client": "qbittorrent-5.1.4.client",
-  "simultaneous_seed": 200,
-  "keep_torrent_with_zero_leechers": true,
-  "announce": {
-    "port": 6881,
-    "ip": "",
-    "ipv6": ""
-  },
-  "tracker": {
-    "timeout_seconds": 15,
-    "proxy": "",
-    "reuse_connections": true,
-    "max_idle_conns": 100,
-    "max_idle_conns_per_host": 10,
-    "idle_conn_timeout_seconds": 90,
-    "failure_backoff_min_seconds": 5,
-    "failure_backoff_max_seconds": 300
-  },
-  "logging": {
-    "file": ""
-  },
-  "metrics": {
-    "enabled": true,
-    "listen": "127.0.0.1:9090",
-    "path": "/metrics",
-    "webui": true
-  },
-  "max_consecutive_failures": 5,
-  "uploaded": {
-    "strategy": "configured_rate",
-    "conservative_rate_bps": 1024,
-    "configured_rate_bps": 170000,
-    "min_rate_bps": 30000,
-    "max_rate_bps": 170000,
-    "random_jitter_percent": 10,
-    "random_refresh_seconds": 1200,
-    "ratio_target": 0
-  },
-  "scan_interval_seconds": 5,
-  "shutdown_stop_timeout_seconds": 20
-}
-```
+### 🛡️ 安全可靠
+- **优雅退出**：`Ctrl+C` 时向所有 tracker 发送 `stopped`
+- **无需真实文件**：仅需 `.torrent` 文件，无需下载内容
+- **保守默认值**：`left=0`，`downloaded=0`，`uploaded` 默认不增长
 
 ## 快速开始
 
-```sh
-./openpt --config config.example.json
-```
+### 本地运行
 
-Windows 下运行：
+1. 从 [Releases](https://github.com/your-repo/OpenPT/releases) 下载对应系统的压缩包并解压
 
-```powershell
-.\openpt.exe --config config.example.json
-```
+2. 创建并编辑配置文件：
+   ```sh
+   cp examples/config.example.toml config.toml
+   nano config.toml
+   ```
 
-停止程序时按 `Ctrl+C`，OpenPT 会尽量向已启动的 torrent 发送 `stopped` announce。
+3. 将 `.torrent` 文件放入 `torrents/` 目录
 
-## Docker Compose
+4. 启动程序：
+   ```sh
+   ./openpt --config config.toml
+   ```
+
+5. 访问 Web UI：`http://127.0.0.1:9090`
+
+### Docker 运行
 
 创建 `compose.yml`：
 
 ```yaml
 services:
   openpt:
-    image: chenbin3625/openpt
+    image: chenbin3625/openpt:latest
     container_name: openpt
     restart: unless-stopped
     ports:
-      - "127.0.0.1:9090:9090"  # 仅本地访问，如需远程访问改为 "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
-      - ./openpt-data:/data
+      - ./data:/data
 ```
-
-> **安全提示**: 默认仅绑定 `127.0.0.1`，如需远程访问 Web UI，请将端口映射改为 `"9090:9090"` 并确保网络环境安全。
 
 启动：
-
 ```sh
 docker compose up -d
 ```
 
-首次启动会在 `openpt-data` 中生成基础文件和目录：
-
-- `config.json`
-- `torrents/`
-- `torrents/archived/`
-- `clients/`
-
-编辑 `openpt-data/config.json`，默认客户端为 `qbittorrent-5.1.4.client`。把需要保种的 `.torrent` 文件放入 `openpt-data/torrents`。
-
-再次启动或重载：
-
+首次启动自动生成 `data/config.toml`，编辑后重启容器：
 ```sh
-docker compose up -d
+docker compose restart
 ```
 
-查看日志：
+## 配置说明
 
-```sh
-docker compose logs -f openpt
+### 核心配置
+
+```toml
+# 同时保种数量（设为 0 可暂停所有做种）
+simultaneous_seed = 200
+
+# 客户端伪装文件
+client = "qbittorrent-5.1.4.client"
 ```
 
-停止：
+### 上传策略
 
-```sh
-docker compose down
+```toml
+[uploaded]
+# 策略：none（不增长） / conservative_rate（低速） / configured_rate（自定义）
+strategy = "configured_rate"
+
+# 上传速率（字节/秒）
+configured_rate_bps = 170000  # ≈ 166 KB/s
+
+# 速率范围（用于随机波动）
+min_rate_bps = 30000   # 29 KB/s
+max_rate_bps = 170000  # 166 KB/s
+
+# 随机抖动百分比（0-100）
+random_jitter_percent = 10
+
+# 分享率目标（0 = 永不停止）
+ratio_target = 2.0
 ```
 
-## 上传量策略
+**速率计算参考**：
+- 100 KB/s = 102400
+- 500 KB/s = 512000
+- 1 MB/s = 1048576
 
-- `none`：不累计上传量，默认推荐
-- `conservative_rate`：按较低速率累计上传量
-- `configured_rate`：按配置速率累计上传量
+### Tracker 配置
 
-当 `uploaded.max_rate_bps` 大于 0 时，OpenPT 会在区间内随机选择当前全局速度，并按 `uploaded.random_refresh_seconds` 定期刷新；这不要求 `uploaded.configured_rate_bps` 非 0。没有显式区间但设置了 `uploaded.random_jitter_percent` 时，会围绕当前策略速率生成随机上下浮动。
+```toml
+[tracker]
+timeout_seconds = 15
+proxy = ""  # HTTP/SOCKS5 代理，如 "http://127.0.0.1:7890"
+reuse_connections = true
+failure_backoff_min_seconds = 5
+failure_backoff_max_seconds = 300
+```
 
-OpenPT 会根据 tracker 返回的 peers 分配每个 torrent 的上传速度：有更多 leechers、且 leechers 占比更高的 torrent 会获得更多带宽。
+### 监控配置
 
-`keep_torrent_with_zero_leechers=false` 时，只要 tracker 返回的 seeders 或 leechers 任一为 0，OpenPT 都会发送 `stopped` 并归档该 torrent。
+```toml
+[metrics]
+enabled = true
+listen = "127.0.0.1:9090"  # 改为 "0.0.0.0:9090" 允许外部访问
+webui = true
+```
 
-无论使用哪种策略，OpenPT 都不会让 `downloaded` 随时间增长，完整保种场景下 `left` 始终为 `0`。
+## 工作原理
 
-## 运行期维护
+### 种子生命周期
 
-发送 `SIGHUP` 会重载配置，并应用 tracker 超时/连接池、失败退避、上传速率、ratio target、同时保种数量等运行期参数；如果调大 `simultaneous_seed`，OpenPT 会立即补满可用槽位。更换 client 文件、torrent/client 目录、日志文件路径或 metrics 监听地址/路径需要重启。
+1. **加载**：扫描 `torrents/` 目录，解析 `.torrent` 文件
+2. **启动**：发送 `started` announce，注册到 tracker
+3. **定期汇报**：按 tracker 返回的 `interval` 定期 announce
+4. **智能停止**：以下情况自动停止
+   - 达到分享率目标 (`ratio_target`)
+   - 连续失败 10 次（损坏/无效种子）
+   - 种子文件被删除
+5. **停止通知**：发送 `stopped` announce，释放槽位
 
-## 当前限制
+### 失败重试机制
 
-- 仅支持 HTTP/HTTPS tracker，暂不支持 UDP tracker
-- 运行状态保存在内存中，重启后不会恢复进程内生成的临时状态
-- Web UI 仅支持查看，不支持远程控制
+使用指数退避策略，最多重试 10 次：
+
+```
+失败 1 次 → 等待 5 秒
+失败 2 次 → 等待 10 秒
+失败 3 次 → 等待 20 秒
+失败 4 次 → 等待 40 秒
+...
+失败 10 次 → 停止种子
+```
+
+### 带宽分配
+
+OpenPT 根据 tracker 返回的 peers 动态分配上传速度：
+
+- 有更多 **leechers** 的种子获得更多带宽
+- 无 peers 的种子分配最低带宽
+- 总带宽不超过 `max_rate_bps`
+
+## 配置热重载
+
+发送 `SIGHUP` 信号重载配置（无需重启）：
+
+```sh
+kill -HUP $(pidof openpt)
+```
+
+**可热重载**：
+- ✅ 同时保种数量
+- ✅ 上传速度配置
+- ✅ 分享率目标
+- ✅ Tracker 配置
+
+**需要重启**：
+- ❌ 客户端伪装文件
+- ❌ 目录路径
+- ❌ 监控服务地址
+
+## Web UI 功能
+
+访问 `http://127.0.0.1:9090` 查看：
+
+| 功能 | 说明 |
+|------|------|
+| 🟢 实时状态 | SSE 自动更新种子列表 |
+| 📊 统计信息 | 活跃种子数、总速度、总上传量 |
+| 🔍 搜索过滤 | 按名称搜索，按状态筛选 |
+| ⚠️ 异常提示 | 自动标记失败和无 peer 种子 |
+| 📋 配置查看 | 查看当前运行配置 |
+| 🔗 Prometheus | 导出指标供 Grafana 监控 |
+
+## 版本更新日志
+
+### v0.0.6 (2024-XX-XX)
+
+**重大改进**：
+- ✅ 添加最大失败次数限制（10 次），防止损坏种子永久占用槽位
+- ✅ 修复达到分享率目标后无限重启的 bug
+- ✅ 修复 stopped announce 可能在进程退出前未完成的问题
+- ✅ 允许 `simultaneous_seed = 0` 暂停所有做种
+- ✅ 删除重复的 `fillSlots` 调用，提升性能
+- ✅ 同步等待 stopped announce 完成，确保 tracker 收到通知
+
+**功能移除**：
+- ❌ 删除 `keep_torrent_with_zero_leechers` 配置（无实际作用）
+- ❌ 完全移除归档功能，简化代码逻辑
+- ❌ 停止支持 JSON 配置格式，统一使用 TOML
+
+**性能优化**：
+- 🚀 优化种子移除时的槽位填充逻辑
+- 🚀 减少不必要的全量扫描
+
+## 常见问题
+
+### Q: 需要真实的文件吗？
+不需要。OpenPT 只需要 `.torrent` 文件，向 tracker 汇报时声明已下载完成（`left=0`）。
+
+### Q: 会真的上传数据吗？
+不会。OpenPT 只向 tracker 汇报上传量数字，不实际上传文件数据。
+
+### Q: 安全吗？
+相对安全。OpenPT 行为保守（默认上传量不增长），但仍存在被检测的理论可能。建议：
+- 使用 `none` 或 `conservative_rate` 策略
+- 不要设置过高的上传速度
+- 定期更换客户端伪装
+
+### Q: 支持 UDP tracker 吗？
+暂不支持。仅支持 HTTP/HTTPS tracker。
+
+### Q: 重启后会丢失数据吗？
+会。运行状态（上传量、失败次数等）保存在内存中，重启后重新开始。但这通常不是问题，因为 tracker 会维护真实数据。
+
+## 技术架构
+
+- **语言**：Go 1.23+
+- **配置**：TOML（github.com/BurntSushi/toml）
+- **Torrent 解析**：github.com/anacrolix/torrent/metainfo
+- **文件监控**：github.com/fsnotify/fsnotify
+- **Web UI**：原生 HTML/CSS/JavaScript + SSE
+
+## 许可证
+
+MIT License
+
+## 致谢
+
+本项目受 [JOAL](https://github.com/anthonyraymond/joal) 启发。
