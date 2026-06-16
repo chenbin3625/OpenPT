@@ -24,9 +24,10 @@
     "file": ""
   },
   "metrics": {
-    "enabled": false,
+    "enabled": true,
     "listen": "127.0.0.1:9090",
-    "path": "/metrics"
+    "path": "/metrics",
+    "webui": true
   },
   "max_consecutive_failures": 5,
   "uploaded": {

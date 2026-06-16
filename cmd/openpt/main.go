@@ -18,6 +18,7 @@ import (
 	"openpt/internal/scheduler"
 	"openpt/internal/store"
 	"openpt/internal/tracker"
+	"openpt/internal/web"
 )
 
 var (
@@ -76,7 +77,7 @@ func main() {
 
 	s := scheduler.New(cfg, emu, trackerClient, bw, st, log)
 	s.Start(ctx)
-	metricsServer := startMetricsServer(cfg, bw, s, log)
+	metricsServer := startMetricsServer(cfg, bw, s, st, log)
 	if metricsServer != nil {
 		defer metricsServer.Shutdown(context.Background())
 	}
@@ -146,7 +147,7 @@ func trackerOptions(cfg config.Config) tracker.Options {
 	}
 }
 
-func startMetricsServer(cfg config.Config, bw *bandwidth.Dispatcher, s *scheduler.Scheduler, log *slog.Logger) *http.Server {
+func startMetricsServer(cfg config.Config, bw *bandwidth.Dispatcher, s *scheduler.Scheduler, st *store.Store, log *slog.Logger) *http.Server {
 	if !cfg.Metrics.Enabled {
 		return nil
 	}
@@ -162,6 +163,13 @@ func startMetricsServer(cfg config.Config, bw *bandwidth.Dispatcher, s *schedule
 			fmt.Fprintf(w, "openpt_torrent_leechers{info_hash=%q} %d\n", infoHash, st.Leechers)
 		}
 	})
+
+	if cfg.Metrics.WebUI {
+		webHandler := web.New(st, s, bw)
+		webHandler.RegisterRoutes(mux)
+		log.Info("web UI enabled", "url", "http://"+cfg.Metrics.Listen+"/")
+	}
+
 	server := &http.Server{Addr: cfg.Metrics.Listen, Handler: mux}
 	go func() {
 		log.Info("metrics server started", "listen", cfg.Metrics.Listen, "path", cfg.Metrics.Path)

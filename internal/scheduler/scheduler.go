@@ -21,6 +21,21 @@ type Result struct {
 	Done      bool
 }
 
+// TorrentStatus holds the status of a torrent for the web UI.
+type TorrentStatus struct {
+	InfoHash    string  `json:"info_hash"`
+	Name        string  `json:"name"`
+	Size        int64   `json:"size"`
+	Uploaded    int64   `json:"uploaded"`
+	SpeedBps    int64   `json:"speed_bps"`
+	Seeders     int     `json:"seeders"`
+	Leechers    int     `json:"leechers"`
+	Ratio       float64 `json:"ratio"`
+	TrackerHost string  `json:"tracker_host"`
+	Failures    int     `json:"failures"`
+	HasIssue    bool    `json:"has_issue"`
+}
+
 func NextAfter(event clientemu.Event, interval time.Duration, err error) Result {
 	if err != nil {
 		return Result{NextEvent: event, Delay: interval}
@@ -350,3 +365,37 @@ func stringsTrimPrefix(s, prefix string) string {
 }
 
 func HashID(hash [20]byte) string { return hex.EncodeToString(hash[:]) }
+
+// Status returns the status of all active torrents.
+func (s *Scheduler) Status() []TorrentStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]TorrentStatus, 0, len(s.active))
+	for _, a := range s.active {
+		infoHashHex := a.torrent.InfoHashHex()
+		stats := s.bw.Get(infoHashHex)
+		ratio := float64(0)
+		if a.torrent.Size > 0 && stats.Uploaded > 0 {
+			ratio = float64(stats.Uploaded) / float64(a.torrent.Size)
+		}
+		trackerHostStr := ""
+		if len(a.torrent.AnnounceList) > 0 {
+			trackerHostStr = trackerHost(a.torrent.AnnounceList[a.trackerIndex%len(a.torrent.AnnounceList)])
+		}
+		hasIssue := a.failures > 0 || (stats.Seeders == 0 && stats.Leechers == 0)
+		out = append(out, TorrentStatus{
+			InfoHash:    infoHashHex,
+			Name:        a.torrent.Name,
+			Size:        a.torrent.Size,
+			Uploaded:    stats.Uploaded,
+			SpeedBps:    stats.CurrentSpeedBps,
+			Seeders:     stats.Seeders,
+			Leechers:    stats.Leechers,
+			Ratio:       ratio,
+			TrackerHost: trackerHostStr,
+			Failures:    a.failures,
+			HasIssue:    hasIssue,
+		})
+	}
+	return out
+}

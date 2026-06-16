@@ -64,6 +64,7 @@ type MetricsConfig struct {
 	Enabled bool   `json:"enabled"`
 	Listen  string `json:"listen"`
 	Path    string `json:"path"`
+	WebUI   bool   `json:"webui"`
 }
 
 func Load(path string) (Config, error) {
@@ -179,6 +180,9 @@ func (c *Config) applyDefaults(configPath string) {
 	}
 	if c.Metrics.Path == "" {
 		c.Metrics.Path = "/metrics"
+	}
+	if !c.Metrics.Enabled {
+		c.Metrics.WebUI = false
 	}
 }
 
