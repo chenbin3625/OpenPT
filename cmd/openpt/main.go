@@ -69,7 +69,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	st := store.New(cfg.TorrentsDir, "", log)
+	st := store.New(ctx, cfg.TorrentsDir, "", log)
 	if err := st.Start(ctx); err != nil {
 		log.Error("failed to start torrent store", "error", err)
 		os.Exit(1)

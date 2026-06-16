@@ -110,7 +110,7 @@ func TestStopTorrentRemovesFromActive(t *testing.T) {
 	first := activeHash(t, s)
 
 	// 手动停止第一个 torrent
-	s.stopTorrent(ctx, first)
+	s.stopTorrent(ctx, first, StopReasonManual)
 
 	// 由于不再归档，种子会被重新添加，但我们至少验证 stopTorrent 被调用了
 	// 这个测试主要验证系统不会崩溃
@@ -133,7 +133,7 @@ func newTestScheduler(t *testing.T, ctx context.Context, announce string, simult
 		writeTestTorrent(t, filepath.Join(torrentsDir, fmt.Sprintf("torrent-%d.torrent", i)), announce, fmt.Sprintf("file-%d.bin", i), int64(100+i))
 	}
 	log := slog.New(slog.NewTextHandler(testLogWriter{t: t}, nil))
-	st := store.New(torrentsDir, "", log)
+	st := store.New(ctx, torrentsDir, "", log)
 	if err := st.Start(ctx); err != nil {
 		t.Fatal(err)
 	}

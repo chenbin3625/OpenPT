@@ -27,6 +27,7 @@ type Event struct {
 }
 
 type Store struct {
+	ctx         context.Context
 	torrentsDir string
 	log         *slog.Logger
 	mu          sync.RWMutex
@@ -34,12 +35,13 @@ type Store struct {
 	events      chan Event
 }
 
-func New(torrentsDir, archiveDir string, log *slog.Logger) *Store {
+func New(ctx context.Context, torrentsDir, archiveDir string, log *slog.Logger) *Store {
 	return &Store{
+		ctx:         ctx,
 		torrentsDir: torrentsDir,
 		log:         log,
 		byPath:      map[string]*torrent.Torrent{},
-		events:      make(chan Event, 64),
+		events:      make(chan Event, 256), // 增加缓冲区避免阻塞
 	}
 }
 
@@ -134,7 +136,9 @@ func (s *Store) loadFileQuiet(path string) {
 	t, err := torrent.Load(path)
 	if err != nil {
 		s.log.Warn("invalid torrent, removing", "path", path, "reason", err)
-		os.Remove(path)
+		if err := os.Remove(path); err != nil {
+			s.log.Warn("failed to remove invalid torrent", "path", path, "error", err)
+		}
 		return
 	}
 	s.mu.Lock()
@@ -147,7 +151,9 @@ func (s *Store) loadFile(path string) {
 	t, err := torrent.Load(path)
 	if err != nil {
 		s.log.Warn("invalid torrent, removing", "path", path, "reason", err)
-		os.Remove(path)
+		if err := os.Remove(path); err != nil {
+			s.log.Warn("failed to remove invalid torrent", "path", path, "error", err)
+		}
 		return
 	}
 	s.mu.Lock()
@@ -161,9 +167,14 @@ func (s *Store) loadFile(path string) {
 	select {
 	case s.events <- Event{Type: Added, Torrent: t}:
 	default:
-		// channel 满，在 goroutine 中发送以避免阻塞 fsnotify 事件循环
+		// channel 满，在 goroutine 中异步发送，并监听 context 避免泄漏
 		go func() {
-			s.events <- Event{Type: Added, Torrent: t}
+			select {
+			case s.events <- Event{Type: Added, Torrent: t}:
+			case <-s.ctx.Done():
+				s.log.Debug("context cancelled, dropping torrent event", "path", path)
+				return
+			}
 		}()
 	}
 }
