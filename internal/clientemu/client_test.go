@@ -64,6 +64,8 @@ func TestURLEncoderRules(t *testing.T) {
 func TestHeaderPlaceholders(t *testing.T) {
 	t.Setenv("LC_ALL", "")
 	t.Setenv("LANG", "zh_CN.UTF-8")
+	t.Setenv("OPENPT_JAVA_VERSION", "17.0.12")
+	t.Setenv("OPENPT_OS_NAME", "Test OS")
 	c, err := NewClient(ClientConfig{
 		PeerGenerator: GeneratorConfig{
 			Algorithm: AlgorithmConfig{Type: "REGEX", Pattern: "-AA0000-[A-Za-z0-9]{12}"},
@@ -81,8 +83,27 @@ func TestHeaderPlaceholders(t *testing.T) {
 	if strings.Contains(headers[0].Value, "{") || strings.Contains(headers[1].Value, "{") {
 		t.Fatalf("placeholders were not replaced: %#v", headers)
 	}
-	if headers[1].Value != "zh_CN.UTF-8" {
+	if headers[0].Value != "Azureus;Test OS;Java 17.0.12" {
+		t.Fatalf("user agent header = %q", headers[0].Value)
+	}
+	if headers[1].Value != "zh-CN" {
 		t.Fatalf("locale header = %q", headers[1].Value)
+	}
+}
+
+func TestNumwantOnStopMustNotBeNegative(t *testing.T) {
+	_, err := NewClient(ClientConfig{
+		PeerGenerator: GeneratorConfig{
+			Algorithm: AlgorithmConfig{Type: "REGEX", Pattern: "-AA0000-[A-Za-z0-9]{12}"},
+			RefreshOn: "NEVER",
+		},
+		URLEncoder:    URLEncoder{EncodingExclusionPattern: "[A-Za-z0-9-]", EncodedHexCase: "lower"},
+		Query:         "info_hash={infohash}&peer_id={peerid}&port={port}&uploaded={uploaded}&downloaded={downloaded}&left={left}&event={event}&numwant={numwant}",
+		Numwant:       1,
+		NumwantOnStop: -1,
+	})
+	if err == nil {
+		t.Fatal("expected negative numwantOnStop to fail")
 	}
 }
 

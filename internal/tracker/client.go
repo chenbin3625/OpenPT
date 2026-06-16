@@ -11,26 +11,72 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"openpt/internal/clientemu"
 )
 
-type Client struct {
-	http *http.Client
-	log  *slog.Logger
+type Options struct {
+	Timeout             time.Duration
+	Proxy               string
+	ReuseConnections    bool
+	MaxIdleConns        int
+	MaxIdleConnsPerHost int
+	IdleConnTimeout     time.Duration
 }
 
-func New(timeout time.Duration, proxy string, log *slog.Logger) (*Client, error) {
+type Client struct {
+	mu                 sync.RWMutex
+	http               *http.Client
+	reuseConnections   bool
+	closeIdleTransport func()
+	log                *slog.Logger
+}
+
+func New(opts Options, log *slog.Logger) (*Client, error) {
+	httpClient, closeIdle, err := newHTTPClient(opts)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{
+		http:               httpClient,
+		reuseConnections:   opts.ReuseConnections,
+		closeIdleTransport: closeIdle,
+		log:                log,
+	}, nil
+}
+
+func (c *Client) Configure(opts Options) error {
+	httpClient, closeIdle, err := newHTTPClient(opts)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	oldCloseIdle := c.closeIdleTransport
+	c.http = httpClient
+	c.reuseConnections = opts.ReuseConnections
+	c.closeIdleTransport = closeIdle
+	c.mu.Unlock()
+	if oldCloseIdle != nil {
+		oldCloseIdle()
+	}
+	return nil
+}
+
+func newHTTPClient(opts Options) (*http.Client, func(), error) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
-	if proxy != "" {
-		u, err := url.Parse(proxy)
+	tr.MaxIdleConns = opts.MaxIdleConns
+	tr.MaxIdleConnsPerHost = opts.MaxIdleConnsPerHost
+	tr.IdleConnTimeout = opts.IdleConnTimeout
+	if opts.Proxy != "" {
+		u, err := url.Parse(opts.Proxy)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		tr.Proxy = http.ProxyURL(u)
 	}
-	return &Client{http: &http.Client{Timeout: timeout, Transport: tr}, log: log}, nil
+	return &http.Client{Timeout: opts.Timeout, Transport: tr}, tr.CloseIdleConnections, nil
 }
 
 func (c *Client) Announce(ctx context.Context, baseURL, query string, headers []clientemu.Header) (Response, error) {
@@ -44,11 +90,18 @@ func (c *Client) Announce(ctx context.Context, baseURL, query string, headers []
 		return Response{}, err
 	}
 	req.Host = req.URL.Host
+	c.mu.RLock()
+	httpClient := c.http
+	reuseConnections := c.reuseConnections
+	c.mu.RUnlock()
 	for _, h := range headers {
+		if reuseConnections && strings.EqualFold(h.Name, "Connection") && strings.EqualFold(h.Value, "close") {
+			continue
+		}
 		req.Header.Add(h.Name, h.Value)
 	}
 	c.log.Info("announce request", "host", req.URL.Host, "scheme", req.URL.Scheme)
-	resp, err := c.http.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return Response{}, err
 	}

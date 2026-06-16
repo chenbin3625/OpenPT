@@ -87,6 +87,9 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	if cfg.Numwant < 1 {
 		return nil, errors.New("numwant must be at least 1")
 	}
+	if cfg.NumwantOnStop < 0 {
+		return nil, errors.New("numwantOnStop must be at least 0")
+	}
 	peer, err := NewGenerator(cfg.PeerGenerator, true)
 	if err != nil {
 		return nil, fmt.Errorf("peerIdGenerator: %w", err)
@@ -126,17 +129,73 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 }
 
 func replaceHeaderPlaceholders(value string) string {
-	value = strings.ReplaceAll(value, "{java}", strings.TrimPrefix(runtime.Version(), "go"))
-	value = strings.ReplaceAll(value, "{os}", runtime.GOOS)
-	locale := os.Getenv("LC_ALL")
-	if locale == "" {
-		locale = os.Getenv("LANG")
-	}
-	if locale == "" {
-		locale = "en-US"
-	}
-	value = strings.ReplaceAll(value, "{locale}", locale)
+	value = strings.ReplaceAll(value, "{java}", javaVersionForHeader())
+	value = strings.ReplaceAll(value, "{os}", osNameForHeader())
+	value = strings.ReplaceAll(value, "{locale}", localeForHeader())
 	return value
+}
+
+func javaVersionForHeader() string {
+	if v := os.Getenv("OPENPT_JAVA_VERSION"); v != "" {
+		return v
+	}
+	if v := os.Getenv("JAVA_VERSION"); v != "" {
+		return v
+	}
+	return "1.8.0_66"
+}
+
+func osNameForHeader() string {
+	if v := os.Getenv("OPENPT_OS_NAME"); v != "" {
+		return v
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		return "Mac OS X"
+	case "windows":
+		return "Windows 10"
+	case "linux":
+		return "Linux"
+	case "freebsd":
+		return "FreeBSD"
+	case "openbsd":
+		return "OpenBSD"
+	case "netbsd":
+		return "NetBSD"
+	default:
+		return runtime.GOOS
+	}
+}
+
+func localeForHeader() string {
+	if v := os.Getenv("OPENPT_LOCALE"); v != "" {
+		return v
+	}
+	if v := os.Getenv("LC_ALL"); v != "" {
+		return normalizeLocaleForHeader(v)
+	}
+	if v := os.Getenv("LANG"); v != "" {
+		return normalizeLocaleForHeader(v)
+	}
+	return "en-US"
+}
+
+func normalizeLocaleForHeader(locale string) string {
+	if i := strings.IndexAny(locale, ".@"); i >= 0 {
+		locale = locale[:i]
+	}
+	locale = strings.ReplaceAll(locale, "_", "-")
+	if locale == "" || locale == "C" || locale == "POSIX" {
+		return "en-US"
+	}
+	parts := strings.Split(locale, "-")
+	parts[0] = strings.ToLower(parts[0])
+	for i := 1; i < len(parts); i++ {
+		if len(parts[i]) == 2 {
+			parts[i] = strings.ToUpper(parts[i])
+		}
+	}
+	return strings.Join(parts, "-")
 }
 
 type RenderInput struct {
