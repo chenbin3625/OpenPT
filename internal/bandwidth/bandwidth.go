@@ -258,15 +258,20 @@ func (d *Dispatcher) recomputeSpeedsLocked() {
 
 func peersWeight(seeders, leechers int) float64 {
 	if seeders <= 0 && leechers <= 0 {
-		return 1.0 // 无 peers 信息时使用默认权重，避免带宽完全浪费
+		return 1.0 // 无 peers 信息时使用默认权重
 	}
-	if seeders <= 0 {
-		seeders = 1
+
+	// 使用局部变量，避免修改输入参数
+	s := seeders
+	l := leechers
+	if s <= 0 {
+		s = 1
 	}
-	if leechers <= 0 {
-		leechers = 1
+	if l <= 0 {
+		l = 1
 	}
-	total := seeders + leechers
-	leechersRatio := float64(leechers) / float64(total)
-	return leechersRatio * 100 * leechersRatio * float64(leechers)
+
+	total := s + l
+	leechersRatio := float64(l) / float64(total)
+	return leechersRatio * 100 * leechersRatio * float64(l)
 }
