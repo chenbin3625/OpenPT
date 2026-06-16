@@ -105,9 +105,22 @@ func (s *Store) scan() error {
 		if e.IsDir() || !torrent.IsTorrentPath(e.Name()) {
 			continue
 		}
-		s.loadFile(filepath.Join(s.torrentsDir, e.Name()))
+		s.loadFileQuiet(filepath.Join(s.torrentsDir, e.Name()))
 	}
 	return nil
+}
+
+func (s *Store) loadFileQuiet(path string) {
+	t, err := torrent.Load(path)
+	if err != nil {
+		s.log.Warn("invalid torrent archived", "path", path, "reason", err)
+		s.archive(path, err.Error())
+		return
+	}
+	s.mu.Lock()
+	s.byPath[path] = t
+	s.mu.Unlock()
+	s.log.Info("torrent loaded", "path", path, "name", t.Name, "size", t.Size, "info_hash", t.InfoHashHex())
 }
 
 func (s *Store) loadFile(path string) {
