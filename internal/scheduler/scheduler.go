@@ -3,7 +3,9 @@ package scheduler
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +36,7 @@ type TorrentStatus struct {
 	TrackerHost string  `json:"tracker_host"`
 	Failures    int     `json:"failures"`
 	HasIssue    bool    `json:"has_issue"`
+	IssueReason string  `json:"issue_reason"`
 }
 
 func NextAfter(event clientemu.Event, interval time.Duration, err error) Result {
@@ -382,7 +385,25 @@ func (s *Scheduler) Status() []TorrentStatus {
 		if len(a.torrent.AnnounceList) > 0 {
 			trackerHostStr = trackerHost(a.torrent.AnnounceList[a.trackerIndex%len(a.torrent.AnnounceList)])
 		}
-		hasIssue := a.failures > 0 || (stats.Seeders == 0 && stats.Leechers == 0)
+
+		// Determine issue status and reason
+		hasIssue := false
+		issueReasons := []string{}
+		if a.failures > 0 {
+			hasIssue = true
+			issueReasons = append(issueReasons, fmt.Sprintf("连续失败 %d 次", a.failures))
+		}
+		if stats.Seeders == 0 && stats.Leechers == 0 {
+			hasIssue = true
+			issueReasons = append(issueReasons, "无 peers 连接")
+		} else if stats.Leechers == 0 {
+			issueReasons = append(issueReasons, "无下载者")
+		}
+		issueReason := ""
+		if len(issueReasons) > 0 {
+			issueReason = strings.Join(issueReasons, "; ")
+		}
+
 		out = append(out, TorrentStatus{
 			InfoHash:    infoHashHex,
 			Name:        a.torrent.Name,
@@ -395,6 +416,7 @@ func (s *Scheduler) Status() []TorrentStatus {
 			TrackerHost: trackerHostStr,
 			Failures:    a.failures,
 			HasIssue:    hasIssue,
+			IssueReason: issueReason,
 		})
 	}
 	return out

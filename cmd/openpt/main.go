@@ -165,7 +165,7 @@ func startMetricsServer(cfg config.Config, bw *bandwidth.Dispatcher, s *schedule
 	})
 
 	if cfg.Metrics.WebUI {
-		webHandler := web.New(st, s, bw)
+		webHandler := web.New(st, s, bw, cfg)
 		webHandler.RegisterRoutes(mux)
 		log.Info("web UI enabled", "url", "http://"+cfg.Metrics.Listen+"/")
 	}

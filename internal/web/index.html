@@ -56,6 +56,7 @@
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             overflow: hidden;
+            margin-bottom: 20px;
         }
         .card-header {
             padding: 16px 20px;
@@ -79,7 +80,7 @@
             display: flex;
             gap: 4px;
         }
-        .filter-btn {
+        .filter-btn, .action-btn {
             padding: 6px 12px;
             border: 1px solid #ddd;
             background: white;
@@ -88,13 +89,22 @@
             cursor: pointer;
             transition: all 0.2s;
         }
-        .filter-btn:hover {
+        .filter-btn:hover, .action-btn:hover {
             background: #f8f9fa;
         }
         .filter-btn.active {
             background: #3498db;
             color: white;
             border-color: #3498db;
+        }
+        .action-btn {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .action-btn svg {
+            width: 14px;
+            height: 14px;
         }
         .filter-btn .badge {
             display: inline-block;
@@ -184,13 +194,17 @@
         .ratio-low { color: #e74c3c; }
         .failures-cell {
             text-align: center;
+            position: relative;
         }
         .failures-badge {
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
             padding: 2px 8px;
             border-radius: 10px;
             font-size: 12px;
             font-weight: 500;
+            cursor: help;
         }
         .failures-badge.ok {
             background: #e8f5e9;
@@ -203,6 +217,38 @@
         .failures-badge.danger {
             background: #ffebee;
             color: #e74c3c;
+        }
+        .issue-icon {
+            width: 14px;
+            height: 14px;
+        }
+        .tooltip {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 100;
+        }
+        .tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: #333;
+        }
+        .failures-cell:hover .tooltip {
+            opacity: 1;
         }
         .empty-state {
             padding: 60px 20px;
@@ -242,12 +288,96 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
+
+        /* Config modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-overlay.active {
+            display: flex;
+        }
+        .modal {
+            background: white;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .modal-close {
+            width: 32px;
+            height: 32px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            color: #666;
+        }
+        .modal-close:hover {
+            background: #f5f5f5;
+        }
+        .modal-body {
+            padding: 24px;
+            overflow-y: auto;
+            flex: 1;
+        }
+        .config-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .config-table tr:not(:last-child) td {
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .config-table td {
+            padding: 12px 0;
+            font-size: 14px;
+        }
+        .config-label {
+            color: #666;
+            width: 40%;
+            padding-right: 16px;
+        }
+        .config-value {
+            font-weight: 500;
+            word-break: break-all;
+        }
+        .config-value.mono {
+            font-family: monospace;
+            font-size: 13px;
+        }
+
         @media (max-width: 768px) {
             .container { padding: 10px; }
             .stats-bar { flex-wrap: wrap; gap: 15px; }
             .filter-input { width: 100%; }
             td, th { padding: 8px 12px; }
             .hash-cell, .tracker-cell { display: none; }
+            .modal { width: 95%; }
         }
     </style>
 </head>
@@ -292,6 +422,13 @@
                         <button class="filter-btn" data-filter="issue">异常 <span class="badge danger" id="issue-badge">0</span></button>
                         <button class="filter-btn" data-filter="normal">正常</button>
                     </div>
+                    <button class="action-btn" id="config-btn" title="查看当前配置">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                        </svg>
+                        当前配置
+                    </button>
                     <input type="text" class="filter-input" id="filter" placeholder="搜索种子名称...">
                 </div>
             </div>
@@ -307,7 +444,7 @@
                             <th data-sort="seeders" class="number-cell">做种</th>
                             <th data-sort="leechers" class="number-cell">下载</th>
                             <th data-sort="ratio" class="number-cell">分享率</th>
-                            <th data-sort="failures" class="number-cell">失败</th>
+                            <th data-sort="failures" class="number-cell">状态</th>
                             <th data-sort="tracker_host">Tracker</th>
                         </tr>
                     </thead>
@@ -327,12 +464,33 @@
         </div>
     </div>
 
+    <!-- Config Modal -->
+    <div class="modal-overlay" id="config-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">当前配置</span>
+                <button class="modal-close" id="modal-close">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <table class="config-table" id="config-table">
+                    <tbody id="config-list">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <script>
         let torrents = [];
         let sortField = 'name';
         let sortAsc = true;
         let filterText = '';
-        let filterMode = 'all'; // all, issue, normal
+        let filterMode = 'all';
         let eventSource = null;
 
         // Format bytes to human readable
@@ -412,11 +570,9 @@
 
             // Apply filters
             let filtered = torrents.filter(t => {
-                // Text filter
                 if (filterText && !t.name.toLowerCase().includes(filterText.toLowerCase())) {
                     return false;
                 }
-                // Mode filter
                 if (filterMode === 'issue' && !t.has_issue) return false;
                 if (filterMode === 'normal' && t.has_issue) return false;
                 return true;
@@ -459,7 +615,15 @@
             tableContainer.style.display = 'block';
             emptyState.style.display = 'none';
 
-            tbody.innerHTML = filtered.map(t => `
+            tbody.innerHTML = filtered.map(t => {
+                const statusIcon = t.has_issue
+                    ? '<svg class="issue-icon" viewBox="0 0 24 24" fill="#e74c3c"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>'
+                    : '<svg class="issue-icon" viewBox="0 0 24 24" fill="#27ae60"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>';
+                const tooltip = t.issue_reason
+                    ? `<div class="tooltip">${esc(t.issue_reason)}</div>`
+                    : '';
+
+                return `
                 <tr class="${t.has_issue ? 'row-issue' : ''}">
                     <td class="hash-cell" title="${esc(t.info_hash)}">${esc(truncateHash(t.info_hash))}</td>
                     <td class="name-cell" title="${esc(t.name)}">${esc(t.name)}</td>
@@ -470,11 +634,16 @@
                     <td class="number-cell">${t.leechers}</td>
                     <td class="number-cell ratio-cell ${getRatioClass(t.ratio)}">${formatRatio(t.ratio)}</td>
                     <td class="number-cell failures-cell">
-                        <span class="failures-badge ${getFailuresClass(t.failures)}">${t.failures}</span>
+                        <span class="failures-badge ${getFailuresClass(t.failures)}">
+                            ${statusIcon}
+                            ${t.failures > 0 ? t.failures + ' 次失败' : '正常'}
+                        </span>
+                        ${tooltip}
                     </td>
                     <td class="tracker-cell" title="${esc(t.tracker_host)}">${esc(t.tracker_host)}</td>
                 </tr>
-            `).join('');
+                `;
+            }).join('');
         }
 
         // Connect to SSE
@@ -507,6 +676,39 @@
             };
         }
 
+        // Load config
+        async function loadConfig() {
+            try {
+                const resp = await fetch('/api/config');
+                const data = await resp.json();
+                const tbody = document.getElementById('config-list');
+                tbody.innerHTML = data.items.map(item => `
+                    <tr>
+                        <td class="config-label">${esc(item.label)}</td>
+                        <td class="config-value">${esc(item.value)}</td>
+                    </tr>
+                `).join('');
+            } catch (e) {
+                console.error('Failed to load config:', e);
+            }
+        }
+
+        // Config modal
+        document.getElementById('config-btn').addEventListener('click', () => {
+            loadConfig();
+            document.getElementById('config-modal').classList.add('active');
+        });
+
+        document.getElementById('modal-close').addEventListener('click', () => {
+            document.getElementById('config-modal').classList.remove('active');
+        });
+
+        document.getElementById('config-modal').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) {
+                e.currentTarget.classList.remove('active');
+            }
+        });
+
         // Filter mode buttons
         document.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -528,7 +730,6 @@
                     sortAsc = true;
                 }
 
-                // Update sort indicators
                 document.querySelectorAll('th').forEach(t => {
                     t.classList.remove('sorted-asc', 'sorted-desc');
                 });
