@@ -74,10 +74,11 @@ type Scheduler struct {
 
 type announcer struct {
 	torrent      *torrent.Torrent
-	mu           sync.Mutex // 保护 trackerIndex
+	mu           sync.Mutex // 保护 trackerIndex 和 lastError
 	trackerIndex int
 	lastInterval time.Duration
 	failures     int
+	lastError    string // 最后一次失败的错误消息
 	started      bool
 	completed    bool // 标记已完成（达到分享率或其他原因停止）
 	parent       context.Context
@@ -253,12 +254,20 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 				return
 			}
 			a.failures++
+			// 保存错误信息
+			a.mu.Lock()
+			a.lastError = err.Error()
+			a.mu.Unlock()
 			delay := backoffDelay(a.failures, cfg.TrackerFailureBackoffMin(), cfg.TrackerFailureBackoffMax())
 			s.log.Warn("announce failed", "event", eventName(event), "name", a.torrent.Name, "failures", a.failures, "retry_in", delay, "error", err)
 			timer.Reset(delay)
 			continue
 		} else {
 			a.failures = 0
+			// 清除错误信息
+			a.mu.Lock()
+			a.lastError = ""
+			a.mu.Unlock()
 			if resp.Interval > 0 {
 				a.lastInterval = time.Duration(resp.Interval) * time.Second
 			}
@@ -421,9 +430,23 @@ func (s *Scheduler) Status() []TorrentStatus {
 		// Determine issue status and reason
 		hasIssue := false
 		issueReasons := []string{}
+
+		// 获取最后的错误信息
+		a.mu.Lock()
+		lastErr := a.lastError
+		a.mu.Unlock()
+
 		if a.failures > 0 {
 			hasIssue = true
-			issueReasons = append(issueReasons, fmt.Sprintf("连续失败 %d 次", a.failures))
+			if lastErr != "" {
+				// 截取错误信息前 200 个字符避免过长
+				if len(lastErr) > 200 {
+					lastErr = lastErr[:200] + "..."
+				}
+				issueReasons = append(issueReasons, fmt.Sprintf("失败 %d 次: %s", a.failures, lastErr))
+			} else {
+				issueReasons = append(issueReasons, fmt.Sprintf("连续失败 %d 次", a.failures))
+			}
 		}
 		if stats.Seeders == 0 && stats.Leechers == 0 {
 			hasIssue = true
