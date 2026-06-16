@@ -110,7 +110,7 @@ func TestStopTorrentRemovesFromActive(t *testing.T) {
 	first := activeHash(t, s)
 
 	// 手动停止第一个 torrent
-	s.stopTorrent(ctx, first)
+	s.stopTorrent(ctx, first, StopReasonManual)
 
 	// 由于不再归档，种子会被重新添加，但我们至少验证 stopTorrent 被调用了
 	// 这个测试主要验证系统不会崩溃
