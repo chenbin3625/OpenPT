@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"openpt/internal/bandwidth"
+	"openpt/internal/config"
 	"openpt/internal/scheduler"
 	"openpt/internal/store"
 )
@@ -20,19 +21,33 @@ type StatusResponse struct {
 	Torrents []scheduler.TorrentStatus `json:"torrents"`
 }
 
+// ConfigItem represents a configuration item with Chinese label.
+type ConfigItem struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
+// ConfigResponse represents the configuration response.
+type ConfigResponse struct {
+	Items []ConfigItem `json:"items"`
+}
+
 // Handler provides HTTP handlers for the web UI.
 type Handler struct {
 	store     *store.Store
 	scheduler *scheduler.Scheduler
 	bw        *bandwidth.Dispatcher
+	cfg       config.Config
 }
 
 // New creates a new web Handler.
-func New(st *store.Store, s *scheduler.Scheduler, bw *bandwidth.Dispatcher) *Handler {
+func New(st *store.Store, s *scheduler.Scheduler, bw *bandwidth.Dispatcher, cfg config.Config) *Handler {
 	return &Handler{
 		store:     st,
 		scheduler: s,
 		bw:        bw,
+		cfg:       cfg,
 	}
 }
 
@@ -40,6 +55,7 @@ func New(st *store.Store, s *scheduler.Scheduler, bw *bandwidth.Dispatcher) *Han
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/", h.handleIndex)
 	mux.HandleFunc("/api/status", h.handleStatus)
+	mux.HandleFunc("/api/config", h.handleConfig)
 	mux.HandleFunc("/api/events", h.handleEvents)
 }
 
@@ -58,6 +74,71 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Torrents: h.scheduler.Status(),
 	}
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	strategy := "不累计上传量"
+	switch h.cfg.Uploaded.Strategy {
+	case "conservative_rate":
+		strategy = "保守速率"
+	case "configured_rate":
+		strategy = "配置速率"
+	}
+
+	items := []ConfigItem{
+		{Key: "torrents_dir", Label: "种子目录", Value: h.cfg.TorrentsDir},
+		{Key: "archive_dir", Label: "归档目录", Value: h.cfg.ArchiveDir},
+		{Key: "clients_dir", Label: "客户端配置目录", Value: h.cfg.ClientsDir},
+		{Key: "client", Label: "客户端伪装", Value: h.cfg.Client},
+		{Key: "simultaneous_seed", Label: "同时保种数量", Value: fmt.Sprintf("%d", h.cfg.SimultaneousSeed)},
+		{Key: "keep_torrent_with_zero_leechers", Label: "保留无下载者的种子", Value: boolToStr(h.cfg.KeepTorrentWithZeroLeechers)},
+		{Key: "max_consecutive_failures", Label: "最大连续失败次数", Value: fmt.Sprintf("%d", h.cfg.MaxConsecutiveFailures)},
+		{Key: "announce.port", Label: "Announce 端口", Value: fmt.Sprintf("%d", h.cfg.Announce.Port)},
+		{Key: "announce.ip", Label: "上报 IPv4 地址", Value: defaultStr(h.cfg.Announce.IP, "自动检测")},
+		{Key: "announce.ipv6", Label: "上报 IPv6 地址", Value: defaultStr(h.cfg.Announce.IPv6, "自动检测")},
+		{Key: "tracker.timeout_seconds", Label: "Tracker 超时", Value: fmt.Sprintf("%d 秒", h.cfg.Tracker.TimeoutSeconds)},
+		{Key: "tracker.proxy", Label: "代理地址", Value: defaultStr(h.cfg.Tracker.Proxy, "无")},
+		{Key: "tracker.reuse_connections", Label: "复用连接", Value: boolToStr(h.cfg.TrackerReuseConnections())},
+		{Key: "uploaded.strategy", Label: "上传策略", Value: strategy},
+		{Key: "uploaded.configured_rate_bps", Label: "配置速率", Value: formatBps(h.cfg.Uploaded.ConfiguredRateBps)},
+		{Key: "uploaded.min_rate_bps", Label: "最小速率", Value: formatBps(h.cfg.Uploaded.MinRateBps)},
+		{Key: "uploaded.max_rate_bps", Label: "最大速率", Value: formatBps(h.cfg.Uploaded.MaxRateBps)},
+		{Key: "uploaded.ratio_target", Label: "目标分享率", Value: formatRatioTarget(h.cfg.Uploaded.RatioTarget)},
+		{Key: "metrics.listen", Label: "监控服务地址", Value: h.cfg.Metrics.Listen},
+		{Key: "metrics.webui", Label: "Web UI", Value: boolToStr(h.cfg.Metrics.WebUI)},
+	}
+
+	json.NewEncoder(w).Encode(ConfigResponse{Items: items})
+}
+
+func boolToStr(b bool) string {
+	if b {
+		return "是"
+	}
+	return "否"
+}
+
+func defaultStr(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
+
+func formatBps(bps int64) string {
+	if bps == 0 {
+		return "0"
+	}
+	return fmt.Sprintf("%.2f KB/s", float64(bps)/1024)
+}
+
+func formatRatioTarget(ratio float64) string {
+	if ratio <= 0 {
+		return "禁用"
+	}
+	return fmt.Sprintf("%.2f", ratio)
 }
 
 func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
