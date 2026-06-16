@@ -97,7 +97,8 @@ func TestArchiveFillsNextSlot(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := requests.Add(1)
 		if n == 1 && strings.Contains(r.URL.RawQuery, "event=started") {
-			_, _ = io.WriteString(w, "d8:intervali3600e8:completei1e10:incompletei1ee")
+			// 返回 leechers=0 触发归档（无下载者时归档）
+			_, _ = io.WriteString(w, "d8:intervali3600e8:completei2e10:incompletei0ee")
 			return
 		}
 		_, _ = io.WriteString(w, "d8:intervali3600e8:completei2e10:incompletei1ee")

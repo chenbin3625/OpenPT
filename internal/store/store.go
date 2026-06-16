@@ -160,7 +160,14 @@ func (s *Store) loadFile(path string) {
 		return
 	}
 	s.log.Info("torrent loaded", "path", path, "name", t.Name, "size", t.Size, "info_hash", t.InfoHashHex())
-	s.events <- Event{Type: Added, Torrent: t}
+	select {
+	case s.events <- Event{Type: Added, Torrent: t}:
+	default:
+		// channel 满，在 goroutine 中发送以避免阻塞 fsnotify 事件循环
+		go func() {
+			s.events <- Event{Type: Added, Torrent: t}
+		}()
+	}
 }
 
 func (s *Store) removeFile(path string) {

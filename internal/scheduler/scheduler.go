@@ -64,6 +64,7 @@ type Scheduler struct {
 
 type announcer struct {
 	torrent      *torrent.Torrent
+	mu           sync.Mutex // 保护 trackerIndex
 	trackerIndex int
 	lastInterval time.Duration
 	failures     int
@@ -143,6 +144,8 @@ func (s *Scheduler) config() config.Config {
 	return s.cfg
 }
 
+// fillSlots fills available slots with torrents from the store.
+// It is safe for concurrent calls: tryAdd checks active map under lock.
 func (s *Scheduler) fillSlots(parent context.Context) {
 	for parent.Err() == nil {
 		cfg := s.config()
@@ -247,7 +250,7 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 				s.completeTorrent(ctx, a, cfg.Uploaded.RatioTarget)
 				return
 			}
-			if !cfg.KeepTorrentWithZeroLeechers && (resp.Seeders < 1 || resp.Leechers < 1) {
+			if !cfg.KeepTorrentWithZeroLeechers && resp.Leechers < 1 {
 				s.log.Info("archiving torrent with no peers", "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex(), "seeders", resp.Seeders, "leechers", resp.Leechers)
 				if _, err := s.announce(ctx, a, clientemu.EventStopped); err != nil {
 					s.log.Warn("failed to send stopped announce after no peers", "name", a.torrent.Name, "error", err)
@@ -278,11 +281,15 @@ func (s *Scheduler) announce(ctx context.Context, a *announcer, event clientemu.
 	if err != nil {
 		return tracker.Response{}, err
 	}
+	a.mu.Lock()
 	base := a.torrent.AnnounceList[a.trackerIndex%len(a.torrent.AnnounceList)]
+	a.mu.Unlock()
 	s.log.Info("announce", "event", eventName(event), "host", trackerHost(base), "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex())
 	resp, err := s.tracker.Announce(ctx, base, query, s.client.HeadersForRequest())
 	if err != nil {
+		a.mu.Lock()
 		a.trackerIndex = (a.trackerIndex + 1) % len(a.torrent.AnnounceList)
+		a.mu.Unlock()
 		return tracker.Response{}, err
 	}
 	s.log.Info("tracker response", "event", eventName(event), "interval", resp.Interval, "seeders", resp.Seeders, "leechers", resp.Leechers, "name", a.torrent.Name)
@@ -383,7 +390,9 @@ func (s *Scheduler) Status() []TorrentStatus {
 		}
 		trackerHostStr := ""
 		if len(a.torrent.AnnounceList) > 0 {
+			a.mu.Lock()
 			trackerHostStr = trackerHost(a.torrent.AnnounceList[a.trackerIndex%len(a.torrent.AnnounceList)])
+			a.mu.Unlock()
 		}
 
 		// Determine issue status and reason

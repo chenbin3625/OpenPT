@@ -34,6 +34,20 @@ func TestInvalidLegacyUploadRatioTargetFails(t *testing.T) {
 	}
 }
 
+func TestLegacyMinUploadRateOnlyMigration(t *testing.T) {
+	// 验证旧配置仅设 minUploadRate 未设 maxUploadRate 时，ConfiguredRateBps 不为 0
+	cfg := loadConfigJSON(t, `{"client":"qbittorrent.client","minUploadRate":500}`)
+	if cfg.Uploaded.Strategy != "configured_rate" {
+		t.Fatalf("strategy = %q, want configured_rate", cfg.Uploaded.Strategy)
+	}
+	if cfg.Uploaded.ConfiguredRateBps != 500*1000 {
+		t.Fatalf("ConfiguredRateBps = %d, want %d", cfg.Uploaded.ConfiguredRateBps, 500*1000)
+	}
+	if cfg.Uploaded.MinRateBps != 500*1000 {
+		t.Fatalf("MinRateBps = %d, want %d", cfg.Uploaded.MinRateBps, 500*1000)
+	}
+}
+
 func loadConfigJSON(t *testing.T, data string) Config {
 	t.Helper()
 	cfg, err := Load(writeConfigJSON(t, data))
