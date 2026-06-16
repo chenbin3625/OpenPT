@@ -1,0 +1,25 @@
+{
+  "torrents_dir": "./torrents",
+  "archive_dir": "./torrents/archived",
+  "clients_dir": "./examples/clients",
+  "client": "qbittorrent-4.6.7.client",
+  "simultaneous_seed": 50,
+  "keep_torrent_with_zero_leechers": true,
+  "announce": {
+    "port": 6881,
+    "ip": "",
+    "ipv6": ""
+  },
+  "tracker": {
+    "timeout_seconds": 15,
+    "proxy": ""
+  },
+  "max_consecutive_failures": 5,
+  "uploaded": {
+    "strategy": "none",
+    "conservative_rate_bps": 1024,
+    "configured_rate_bps": 0
+  },
+  "scan_interval_seconds": 5,
+  "shutdown_stop_timeout_seconds": 20
+}
