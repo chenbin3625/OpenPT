@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -122,6 +123,56 @@ func TestStopTorrentRemovesFromActive(t *testing.T) {
 	}
 }
 
+func TestReconcileStopsExcessTorrents(t *testing.T) {
+	recorder := newTrackerEventRecorder("d8:intervali3600e8:completei2e10:incompletei1ee")
+	defer recorder.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := newTestScheduler(t, ctx, recorder.URL, 3, 3)
+	s.fillSlots(ctx)
+	waitUntil(t, func() bool {
+		return recorder.Count("started") == 3
+	})
+
+	cfg := s.config()
+	cfg.SimultaneousSeed = 1
+	s.UpdateConfig(cfg)
+	s.Reconcile(ctx)
+
+	if got := s.ActiveCount(); got != 1 {
+		t.Fatalf("active count after decrease = %d, want 1", got)
+	}
+	if stopped := recorder.Count("stopped"); stopped != 2 {
+		t.Fatalf("stopped announces = %d, want 2", stopped)
+	}
+}
+
+func TestReconcileCanPauseAllTorrents(t *testing.T) {
+	recorder := newTrackerEventRecorder("d8:intervali3600e8:completei2e10:incompletei1ee")
+	defer recorder.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := newTestScheduler(t, ctx, recorder.URL, 2, 2)
+	s.fillSlots(ctx)
+	waitUntil(t, func() bool {
+		return recorder.Count("started") == 2
+	})
+
+	cfg := s.config()
+	cfg.SimultaneousSeed = 0
+	s.UpdateConfig(cfg)
+	s.Reconcile(ctx)
+
+	if got := s.ActiveCount(); got != 0 {
+		t.Fatalf("active count after pause = %d, want 0", got)
+	}
+	if stopped := recorder.Count("stopped"); stopped != 2 {
+		t.Fatalf("stopped announces = %d, want 2", stopped)
+	}
+}
+
 func newTestScheduler(t *testing.T, ctx context.Context, announce string, simultaneousSeed, torrents int) *Scheduler {
 	t.Helper()
 	dir := t.TempDir()
@@ -176,6 +227,30 @@ func trackerResponseServer(response string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, response)
 	}))
+}
+
+type trackerEventRecorder struct {
+	*httptest.Server
+	mu     sync.Mutex
+	counts map[string]int
+}
+
+func newTrackerEventRecorder(response string) *trackerEventRecorder {
+	recorder := &trackerEventRecorder{counts: map[string]int{}}
+	recorder.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		event := r.URL.Query().Get("event")
+		recorder.mu.Lock()
+		recorder.counts[event]++
+		recorder.mu.Unlock()
+		_, _ = io.WriteString(w, response)
+	}))
+	return recorder
+}
+
+func (r *trackerEventRecorder) Count(event string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.counts[event]
 }
 
 func writeTestTorrent(t *testing.T, path, announce, name string, size int64) {

@@ -54,6 +54,16 @@ ratio_target = -2
 	}
 }
 
+func TestInvalidScanIntervalFails(t *testing.T) {
+	path := writeConfigTOML(t, `
+client = "qbittorrent.client"
+scan_interval_seconds = -1
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected invalid scan_interval_seconds to fail")
+	}
+}
+
 func TestDefaultValues(t *testing.T) {
 	cfg := loadConfigTOML(t, `client = "qbittorrent.client"`)
 
@@ -61,11 +71,23 @@ func TestDefaultValues(t *testing.T) {
 	if cfg.SimultaneousSeed != 0 {
 		t.Fatalf("default simultaneous_seed = %d, want 0", cfg.SimultaneousSeed)
 	}
-	if cfg.Announce.Port != 6881 {
-		t.Fatalf("default announce.port = %d, want 6881", cfg.Announce.Port)
+	if cfg.Announce.Port < randomAnnouncePortMin || cfg.Announce.Port > randomAnnouncePortMax {
+		t.Fatalf("default announce.port = %d, want %d..%d", cfg.Announce.Port, randomAnnouncePortMin, randomAnnouncePortMax)
 	}
 	if cfg.Uploaded.Strategy != "none" {
 		t.Fatalf("default uploaded.strategy = %q, want none", cfg.Uploaded.Strategy)
+	}
+}
+
+func TestConfiguredAnnouncePortIsPreserved(t *testing.T) {
+	cfg := loadConfigTOML(t, `
+client = "qbittorrent.client"
+
+[announce]
+port = 51413
+`)
+	if cfg.Announce.Port != 51413 {
+		t.Fatalf("announce.port = %d, want 51413", cfg.Announce.Port)
 	}
 }
 
@@ -96,4 +118,3 @@ func writeConfigTOML(t *testing.T, data string) string {
 	}
 	return path
 }
-

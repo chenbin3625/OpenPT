@@ -1,8 +1,8 @@
 package web
 
 import (
-	"encoding/json"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -38,7 +38,6 @@ type Handler struct {
 	store     *store.Store
 	scheduler *scheduler.Scheduler
 	bw        *bandwidth.Dispatcher
-	cfg       config.Config
 }
 
 // New creates a new web Handler.
@@ -47,7 +46,6 @@ func New(st *store.Store, s *scheduler.Scheduler, bw *bandwidth.Dispatcher, cfg 
 		store:     st,
 		scheduler: s,
 		bw:        bw,
-		cfg:       cfg,
 	}
 }
 
@@ -78,9 +76,10 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	cfg := h.scheduler.Config()
 
 	strategy := "不累计上传量"
-	switch h.cfg.Uploaded.Strategy {
+	switch cfg.Uploaded.Strategy {
 	case "conservative_rate":
 		strategy = "保守速率"
 	case "configured_rate":
@@ -88,23 +87,23 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items := []ConfigItem{
-		{Key: "torrents_dir", Label: "种子目录", Value: h.cfg.TorrentsDir},
-		{Key: "clients_dir", Label: "客户端配置目录", Value: h.cfg.ClientsDir},
-		{Key: "client", Label: "客户端伪装", Value: h.cfg.Client},
-		{Key: "simultaneous_seed", Label: "同时保种数量", Value: fmt.Sprintf("%d", h.cfg.SimultaneousSeed)},
-		{Key: "announce.port", Label: "Announce 端口", Value: fmt.Sprintf("%d", h.cfg.Announce.Port)},
-		{Key: "announce.ip", Label: "上报 IPv4 地址", Value: defaultStr(h.cfg.Announce.IP, "自动检测")},
-		{Key: "announce.ipv6", Label: "上报 IPv6 地址", Value: defaultStr(h.cfg.Announce.IPv6, "自动检测")},
-		{Key: "tracker.timeout_seconds", Label: "Tracker 超时", Value: fmt.Sprintf("%d 秒", h.cfg.Tracker.TimeoutSeconds)},
-		{Key: "tracker.proxy", Label: "代理地址", Value: defaultStr(h.cfg.Tracker.Proxy, "无")},
-		{Key: "tracker.reuse_connections", Label: "复用连接", Value: boolToStr(h.cfg.TrackerReuseConnections())},
+		{Key: "torrents_dir", Label: "种子目录", Value: cfg.TorrentsDir},
+		{Key: "clients_dir", Label: "客户端配置目录", Value: cfg.ClientsDir},
+		{Key: "client", Label: "客户端伪装", Value: cfg.Client},
+		{Key: "simultaneous_seed", Label: "同时保种数量", Value: fmt.Sprintf("%d", cfg.SimultaneousSeed)},
+		{Key: "announce.port", Label: "Announce 端口", Value: fmt.Sprintf("%d", cfg.Announce.Port)},
+		{Key: "announce.ip", Label: "上报 IPv4 地址", Value: defaultStr(cfg.Announce.IP, "自动检测")},
+		{Key: "announce.ipv6", Label: "上报 IPv6 地址", Value: defaultStr(cfg.Announce.IPv6, "自动检测")},
+		{Key: "tracker.timeout_seconds", Label: "Tracker 超时", Value: fmt.Sprintf("%d 秒", cfg.Tracker.TimeoutSeconds)},
+		{Key: "tracker.proxy", Label: "代理地址", Value: defaultStr(cfg.Tracker.Proxy, "无")},
+		{Key: "tracker.reuse_connections", Label: "复用连接", Value: boolToStr(cfg.TrackerReuseConnections())},
 		{Key: "uploaded.strategy", Label: "上传策略", Value: strategy},
-		{Key: "uploaded.configured_rate_bps", Label: "配置速率", Value: formatBps(h.cfg.Uploaded.ConfiguredRateBps)},
-		{Key: "uploaded.min_rate_bps", Label: "最小速率", Value: formatBps(h.cfg.Uploaded.MinRateBps)},
-		{Key: "uploaded.max_rate_bps", Label: "最大速率", Value: formatBps(h.cfg.Uploaded.MaxRateBps)},
-		{Key: "uploaded.ratio_target", Label: "目标分享率", Value: formatRatioTarget(h.cfg.Uploaded.RatioTarget)},
-		{Key: "metrics.listen", Label: "监控服务地址", Value: h.cfg.Metrics.Listen},
-		{Key: "metrics.webui", Label: "Web UI", Value: boolToStr(h.cfg.Metrics.WebUI)},
+		{Key: "uploaded.configured_rate_bps", Label: "配置速率", Value: formatBps(cfg.Uploaded.ConfiguredRateBps)},
+		{Key: "uploaded.min_rate_bps", Label: "最小速率", Value: formatBps(cfg.Uploaded.MinRateBps)},
+		{Key: "uploaded.max_rate_bps", Label: "最大速率", Value: formatBps(cfg.Uploaded.MaxRateBps)},
+		{Key: "uploaded.ratio_target", Label: "目标分享率", Value: formatRatioTarget(cfg.Uploaded.RatioTarget)},
+		{Key: "metrics.listen", Label: "监控服务地址", Value: cfg.Metrics.Listen},
+		{Key: "metrics.webui", Label: "Web UI", Value: boolToStr(cfg.Metrics.WebUI)},
 	}
 
 	json.NewEncoder(w).Encode(ConfigResponse{Items: items})
