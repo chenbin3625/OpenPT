@@ -15,7 +15,7 @@ client = "qbittorrent-5.1.4.client"
 # ========== 目录配置（Docker 容器内路径） ==========
 
 torrents_dir = "/data/torrents"
-clients_dir = "/app/clients"
+clients_dir = "/data/clients"
 
 
 # ========== 其他配置 ==========

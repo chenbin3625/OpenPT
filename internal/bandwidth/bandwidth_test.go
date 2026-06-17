@@ -1,6 +1,9 @@
 package bandwidth
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestDispatcherWeightsBandwidthByPeers(t *testing.T) {
 	d := New(Config{
@@ -13,6 +16,7 @@ func TestDispatcherWeightsBandwidthByPeers(t *testing.T) {
 	d.Register("hot")
 	d.UpdatePeers("cold", 10, 1)
 	d.UpdatePeers("hot", 1, 10)
+	forceElapsed(d, time.Second)
 	d.tick()
 
 	cold := d.Get("cold")
@@ -70,10 +74,33 @@ func TestPeersWeightWithZeroPeers(t *testing.T) {
 		MaxRateBps:        1000,
 	})
 	d.Register("no-peers")
+	forceElapsed(d, time.Second)
 	d.tick()
 
 	st := d.Get("no-peers")
 	if st.CurrentSpeedBps <= 0 {
 		t.Fatalf("CurrentSpeedBps = %d with no peers info, want > 0", st.CurrentSpeedBps)
 	}
+}
+
+func TestDispatcherAccumulatesUploadedByElapsedTime(t *testing.T) {
+	d := New(Config{
+		Strategy:          "configured_rate",
+		ConfiguredRateBps: 1000,
+		MinRateBps:        1000,
+		MaxRateBps:        1000,
+	})
+	d.Register("hash")
+	forceElapsed(d, 2*time.Second)
+	d.tick()
+
+	if got := d.Get("hash").Uploaded; got < 1900 || got > 2100 {
+		t.Fatalf("uploaded = %d, want about 2000", got)
+	}
+}
+
+func forceElapsed(d *Dispatcher, elapsed time.Duration) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.lastTick = time.Now().Add(-elapsed)
 }

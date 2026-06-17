@@ -64,6 +64,35 @@ scan_interval_seconds = -1
 	}
 }
 
+func TestInvalidMetricsPathFailsWhenMetricsEnabled(t *testing.T) {
+	path := writeConfigTOML(t, `
+client = "qbittorrent.client"
+
+[metrics]
+enabled = true
+path = "metrics"
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected metrics.path without leading slash to fail")
+	}
+}
+
+func TestMetricsPathCannotConflictWithWebUIRoutes(t *testing.T) {
+	for _, metricsPath := range []string{"/", "/api/status", "/api/config", "/api/events"} {
+		path := writeConfigTOML(t, `
+client = "qbittorrent.client"
+
+[metrics]
+enabled = true
+webui = true
+path = "`+metricsPath+`"
+`)
+		if _, err := Load(path); err == nil {
+			t.Fatalf("expected metrics.path %q to conflict with web UI routes", metricsPath)
+		}
+	}
+}
+
 func TestDefaultValues(t *testing.T) {
 	cfg := loadConfigTOML(t, `client = "qbittorrent.client"`)
 

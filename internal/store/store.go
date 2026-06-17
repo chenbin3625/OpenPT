@@ -203,8 +203,13 @@ func (s *Store) loadFile(path string) {
 	t, err := torrent.Load(path)
 	if err != nil {
 		s.log.Warn("invalid torrent, removing", "path", path, "reason", err)
+		old := s.removeFileQuiet(path)
 		if err := os.Remove(path); err != nil {
 			s.log.Warn("failed to remove invalid torrent", "path", path, "error", err)
+		}
+		if old != nil {
+			s.log.Info("torrent removed", "path", path, "info_hash", old.InfoHashHex())
+			s.emit(Event{Type: Removed, Torrent: old}, path)
 		}
 		return
 	}
@@ -214,6 +219,10 @@ func (s *Store) loadFile(path string) {
 	s.mu.Unlock()
 	if old != nil && old.InfoHash == t.InfoHash {
 		return
+	}
+	if old != nil {
+		s.log.Info("torrent replaced", "path", path, "old_info_hash", old.InfoHashHex(), "new_info_hash", t.InfoHashHex())
+		s.emit(Event{Type: Removed, Torrent: old}, path)
 	}
 	s.log.Info("torrent loaded", "path", path, "name", t.Name, "size", t.Size, "info_hash", t.InfoHashHex())
 	s.emit(Event{Type: Added, Torrent: t}, path)
@@ -228,6 +237,14 @@ func (s *Store) removeFile(path string) {
 		s.log.Info("torrent removed", "path", path, "info_hash", t.InfoHashHex())
 		s.emit(Event{Type: Removed, Torrent: t}, path)
 	}
+}
+
+func (s *Store) removeFileQuiet(path string) *torrent.Torrent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t := s.byPath[path]
+	delete(s.byPath, path)
+	return t
 }
 
 func (s *Store) emit(ev Event, path string) {

@@ -173,6 +173,61 @@ func TestReconcileCanPauseAllTorrents(t *testing.T) {
 	}
 }
 
+func TestReplacingTorrentFileStopsOldTorrentAndStartsNewOne(t *testing.T) {
+	recorder := newTrackerEventRecorder("d8:intervali3600e8:completei2e10:incompletei1ee")
+	defer recorder.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	torrentsDir := filepath.Join(dir, "torrents")
+	if err := os.MkdirAll(torrentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(torrentsDir, "replace.torrent")
+	writeTestTorrent(t, path, recorder.URL, "old.bin", 100)
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st := store.NewWithScanInterval(ctx, torrentsDir, "", 20*time.Millisecond, log)
+	if err := st.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	tc, err := tracker.New(tracker.Options{Timeout: time.Second, ReuseConnections: true, MaxIdleConns: 10, MaxIdleConnsPerHost: 10, IdleConnTimeout: time.Second}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emu, err := newTestClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bw := bandwidth.New(bandwidth.Config{})
+	s := New(config.Config{
+		SimultaneousSeed: 1,
+		Announce:         config.AnnounceConfig{Port: 6881},
+		Tracker:          config.TrackerConfig{FailureBackoffMinSeconds: 1, FailureBackoffMaxSeconds: 1},
+		Uploaded:         config.UploadedConfig{Strategy: "none"},
+	}, emu, tc, bw, st, log)
+	s.Start(ctx)
+
+	waitUntil(t, func() bool {
+		return recorder.Count("started") == 1
+	})
+
+	tmpPath := filepath.Join(torrentsDir, "replace.tmp")
+	writeTestTorrent(t, tmpPath, recorder.URL, "new.bin", 200)
+	if err := os.Rename(tmpPath, path); err != nil {
+		t.Fatal(err)
+	}
+
+	waitUntil(t, func() bool {
+		return recorder.Count("stopped") == 1 && recorder.Count("started") == 2
+	})
+	waitUntil(t, func() bool {
+		status := s.Status()
+		return len(status) == 1 && status[0].Name == "new.bin"
+	})
+}
+
 func newTestScheduler(t *testing.T, ctx context.Context, announce string, simultaneousSeed, torrents int) *Scheduler {
 	t.Helper()
 	dir := t.TempDir()
@@ -192,15 +247,7 @@ func newTestScheduler(t *testing.T, ctx context.Context, announce string, simult
 	if err != nil {
 		t.Fatal(err)
 	}
-	emu, err := clientemu.NewClient(clientemu.ClientConfig{
-		PeerGenerator: clientemu.GeneratorConfig{
-			Algorithm: clientemu.AlgorithmConfig{Type: "REGEX", Pattern: "-AA0000-[A-Za-z0-9]{12}"},
-			RefreshOn: "NEVER",
-		},
-		URLEncoder: clientemu.URLEncoder{EncodingExclusionPattern: "[A-Za-z0-9-]", EncodedHexCase: "lower"},
-		Query:      "info_hash={info_hash}&peer_id={peer_id}&port={port}&uploaded={uploaded}&downloaded={downloaded}&left={left}&event={event}&numwant={numwant}",
-		Numwant:    1,
-	})
+	emu, err := newTestClient()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,6 +259,18 @@ func newTestScheduler(t *testing.T, ctx context.Context, announce string, simult
 		Uploaded:         config.UploadedConfig{Strategy: "none"},
 	}
 	return New(cfg, emu, tc, bw, st, log)
+}
+
+func newTestClient() (*clientemu.Client, error) {
+	return clientemu.NewClient(clientemu.ClientConfig{
+		PeerGenerator: clientemu.GeneratorConfig{
+			Algorithm: clientemu.AlgorithmConfig{Type: "REGEX", Pattern: "-AA0000-[A-Za-z0-9]{12}"},
+			RefreshOn: "NEVER",
+		},
+		URLEncoder: clientemu.URLEncoder{EncodingExclusionPattern: "[A-Za-z0-9-]", EncodedHexCase: "lower"},
+		Query:      "info_hash={info_hash}&peer_id={peer_id}&port={port}&uploaded={uploaded}&downloaded={downloaded}&left={left}&event={event}&numwant={numwant}",
+		Numwant:    1,
+	})
 }
 
 type testLogWriter struct {
