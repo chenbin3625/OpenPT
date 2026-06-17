@@ -1,8 +1,10 @@
 package config
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +32,11 @@ type AnnounceConfig struct {
 	IP   string `toml:"ip"`
 	IPv6 string `toml:"ipv6"`
 }
+
+const (
+	randomAnnouncePortMin = 49152
+	randomAnnouncePortMax = 65535
+)
 
 type TrackerConfig struct {
 	TimeoutSeconds           int    `toml:"timeout_seconds"`
@@ -100,7 +107,7 @@ func (c *Config) applyDefaults(configPath string) {
 		c.SimultaneousSeed = 1
 	}
 	if c.Announce.Port == 0 {
-		c.Announce.Port = 6881
+		c.Announce.Port = randomAnnouncePort()
 	}
 	if c.Tracker.TimeoutSeconds == 0 {
 		c.Tracker.TimeoutSeconds = 15
@@ -148,6 +155,15 @@ func (c *Config) applyDefaults(configPath string) {
 	if !c.Metrics.Enabled {
 		c.Metrics.WebUI = false
 	}
+}
+
+func randomAnnouncePort() int {
+	span := randomAnnouncePortMax - randomAnnouncePortMin + 1
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(span)))
+	if err != nil {
+		return randomAnnouncePortMin + int(time.Now().UnixNano()%int64(span))
+	}
+	return randomAnnouncePortMin + int(n.Int64())
 }
 
 func (c Config) Validate() error {
@@ -201,6 +217,9 @@ func (c Config) Validate() error {
 	if c.Uploaded.RatioTarget < 0 {
 		return errors.New("uploaded.ratio_target must not be negative")
 	}
+	if c.ScanIntervalSeconds < 1 {
+		return errors.New("scan_interval_seconds must be at least 1")
+	}
 	return nil
 }
 
@@ -226,6 +245,10 @@ func (c Config) TrackerFailureBackoffMax() time.Duration {
 
 func (c Config) UploadedRandomRefresh() time.Duration {
 	return time.Duration(c.Uploaded.RandomRefreshSeconds) * time.Second
+}
+
+func (c Config) ScanInterval() time.Duration {
+	return time.Duration(c.ScanIntervalSeconds) * time.Second
 }
 
 func (c Config) ShutdownStopTimeout() time.Duration {

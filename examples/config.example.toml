@@ -15,6 +15,28 @@ simultaneous_seed = 200
 client = "qbittorrent-5.1.4.client"
 
 
+# ========== 目录配置 ==========
+
+# 种子文件目录
+# 所有要保种的 .torrent 文件放在这里
+torrents_dir = "./torrents"
+
+# 客户端配置文件目录
+# 存放 BitTorrent 客户端模拟配置文件（.client 文件）
+clients_dir = "./clients"
+
+
+# ========== 其他高级配置 ==========
+
+# 种子文件扫描间隔（秒）
+# 每隔多少秒扫描一次 torrents_dir 目录，检测新增/删除的种子
+scan_interval_seconds = 5
+
+# 程序关闭时等待 Tracker 停止汇报的超时时间（秒）
+# 程序退出时会向所有 Tracker 发送 stopped 事件
+shutdown_stop_timeout_seconds = 20
+
+
 # ========== 上传速度配置 ==========
 [uploaded]
 # 上传策略（必填）
@@ -57,22 +79,12 @@ random_refresh_seconds = 1200
 ratio_target = 0
 
 
-# ========== 目录配置 ==========
-
-# 种子文件目录
-# 所有要保种的 .torrent 文件放在这里
-torrents_dir = "./torrents"
-
-# 客户端配置文件目录
-# 存放 BitTorrent 客户端模拟配置文件（.client 文件）
-clients_dir = "./clients"
-
-
 # ========== Announce 配置 ==========
 [announce]
-# 向 Tracker 汇报的端口号（1-65535）
-# 大多数 PT 站不验证端口真实性，使用默认值即可
-port = 6881
+# 向 Tracker 汇报的端口号
+# 0 表示每次启动随机使用 49152-65535 之间的动态端口
+# 如需固定端口，可设置为 1-65535 之间的具体数值
+port = 0
 
 # 向 Tracker 汇报的 IPv4 地址（可选）
 # 留空表示让 Tracker 自动检测
@@ -139,14 +151,3 @@ webui = true
 # 留空表示输出到标准输出（stdout）
 # 如果需要记录到文件，格式如：file = "./logs/openpt.log"
 file = ""
-
-
-# ========== 其他高级配置 ==========
-
-# 种子文件扫描间隔（秒）
-# 每隔多少秒扫描一次 torrents_dir 目录，检测新增/删除的种子
-scan_interval_seconds = 5
-
-# 程序关闭时等待 Tracker 停止汇报的超时时间（秒）
-# 程序退出时会向所有 Tracker 发送 stopped 事件
-shutdown_stop_timeout_seconds = 20

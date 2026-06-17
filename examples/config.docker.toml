@@ -12,6 +12,18 @@ simultaneous_seed = 200
 client = "qbittorrent-5.1.4.client"
 
 
+# ========== 目录配置（Docker 容器内路径） ==========
+
+torrents_dir = "/data/torrents"
+clients_dir = "/app/clients"
+
+
+# ========== 其他配置 ==========
+
+scan_interval_seconds = 5
+shutdown_stop_timeout_seconds = 20
+
+
 # ========== 上传速度配置 ==========
 [uploaded]
 strategy = "configured_rate"
@@ -24,15 +36,10 @@ random_refresh_seconds = 1200
 ratio_target = 0
 
 
-# ========== 目录配置（Docker 容器内路径） ==========
-
-torrents_dir = "/data/torrents"
-clients_dir = "/app/clients"
-
-
 # ========== Announce 配置 ==========
 [announce]
-port = 6881
+# 0 表示每次启动随机使用 49152-65535 之间的动态端口
+port = 0
 ip = ""
 ipv6 = ""
 
@@ -59,9 +66,3 @@ webui = true
 
 [logging]
 file = ""
-
-
-# ========== 其他配置 ==========
-
-scan_interval_seconds = 5
-shutdown_stop_timeout_seconds = 20

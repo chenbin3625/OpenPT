@@ -27,21 +27,27 @@ type Event struct {
 }
 
 type Store struct {
-	ctx         context.Context
-	torrentsDir string
-	log         *slog.Logger
-	mu          sync.RWMutex
-	byPath      map[string]*torrent.Torrent
-	events      chan Event
+	ctx          context.Context
+	torrentsDir  string
+	scanInterval time.Duration
+	log          *slog.Logger
+	mu           sync.RWMutex
+	byPath       map[string]*torrent.Torrent
+	events       chan Event
 }
 
 func New(ctx context.Context, torrentsDir, archiveDir string, log *slog.Logger) *Store {
+	return NewWithScanInterval(ctx, torrentsDir, archiveDir, 5*time.Second, log)
+}
+
+func NewWithScanInterval(ctx context.Context, torrentsDir, archiveDir string, scanInterval time.Duration, log *slog.Logger) *Store {
 	return &Store{
-		ctx:         ctx,
-		torrentsDir: torrentsDir,
-		log:         log,
-		byPath:      map[string]*torrent.Torrent{},
-		events:      make(chan Event, 256), // 增加缓冲区避免阻塞
+		ctx:          ctx,
+		torrentsDir:  torrentsDir,
+		scanInterval: scanInterval,
+		log:          log,
+		byPath:       map[string]*torrent.Torrent{},
+		events:       make(chan Event, 256), // 增加缓冲区避免阻塞
 	}
 }
 
@@ -115,21 +121,67 @@ func (s *Store) Start(ctx context.Context) error {
 			}
 		}
 	}()
+	if s.scanInterval > 0 {
+		go s.periodicScan(ctx)
+	}
 	return nil
 }
 
 func (s *Store) scan() error {
+	return s.scanDir(false)
+}
+
+func (s *Store) scanAndNotify() error {
+	return s.scanDir(true)
+}
+
+func (s *Store) scanDir(notify bool) error {
 	entries, err := os.ReadDir(s.torrentsDir)
 	if err != nil {
 		return err
 	}
+	seen := make(map[string]bool, len(entries))
 	for _, e := range entries {
 		if e.IsDir() || !torrent.IsTorrentPath(e.Name()) {
 			continue
 		}
-		s.loadFileQuiet(filepath.Join(s.torrentsDir, e.Name()))
+		path := filepath.Join(s.torrentsDir, e.Name())
+		seen[path] = true
+		if notify {
+			s.loadFile(path)
+		} else {
+			s.loadFileQuiet(path)
+		}
+	}
+	if notify {
+		var missing []string
+		s.mu.RLock()
+		for path := range s.byPath {
+			if !seen[path] {
+				missing = append(missing, path)
+			}
+		}
+		s.mu.RUnlock()
+		for _, path := range missing {
+			s.removeFile(path)
+		}
 	}
 	return nil
+}
+
+func (s *Store) periodicScan(ctx context.Context) {
+	ticker := time.NewTicker(s.scanInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.scanAndNotify(); err != nil {
+				s.log.Warn("torrent scan error", "error", err)
+			}
+		}
+	}
 }
 
 func (s *Store) loadFileQuiet(path string) {
@@ -164,19 +216,7 @@ func (s *Store) loadFile(path string) {
 		return
 	}
 	s.log.Info("torrent loaded", "path", path, "name", t.Name, "size", t.Size, "info_hash", t.InfoHashHex())
-	select {
-	case s.events <- Event{Type: Added, Torrent: t}:
-	default:
-		// channel 满，在 goroutine 中异步发送，并监听 context 避免泄漏
-		go func() {
-			select {
-			case s.events <- Event{Type: Added, Torrent: t}:
-			case <-s.ctx.Done():
-				s.log.Debug("context cancelled, dropping torrent event", "path", path)
-				return
-			}
-		}()
-	}
+	s.emit(Event{Type: Added, Torrent: t}, path)
 }
 
 func (s *Store) removeFile(path string) {
@@ -186,7 +226,23 @@ func (s *Store) removeFile(path string) {
 	s.mu.Unlock()
 	if t != nil {
 		s.log.Info("torrent removed", "path", path, "info_hash", t.InfoHashHex())
-		s.events <- Event{Type: Removed, Torrent: t}
+		s.emit(Event{Type: Removed, Torrent: t}, path)
+	}
+}
+
+func (s *Store) emit(ev Event, path string) {
+	select {
+	case s.events <- ev:
+	default:
+		// channel 满，在 goroutine 中异步发送，并监听 context 避免泄漏
+		go func() {
+			select {
+			case s.events <- ev:
+			case <-s.ctx.Done():
+				s.log.Debug("context cancelled, dropping torrent event", "path", path)
+				return
+			}
+		}()
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,8 +23,8 @@ type stopReason int
 
 const (
 	StopReasonRemoved     stopReason = iota // 种子文件被删除
-	StopReasonManual                         // 用户手动停止/热重载
-	StopReasonRatioTarget                    // 达到分享率目标
+	StopReasonManual                        // 用户手动停止/热重载
+	StopReasonRatioTarget                   // 达到分享率目标
 )
 
 type Result struct {
@@ -34,18 +35,26 @@ type Result struct {
 
 // TorrentStatus holds the status of a torrent for the web UI.
 type TorrentStatus struct {
-	InfoHash    string  `json:"info_hash"`
-	Name        string  `json:"name"`
-	Size        int64   `json:"size"`
-	Uploaded    int64   `json:"uploaded"`
-	SpeedBps    int64   `json:"speed_bps"`
-	Seeders     int     `json:"seeders"`
-	Leechers    int     `json:"leechers"`
-	Ratio       float64 `json:"ratio"`
-	TrackerHost string  `json:"tracker_host"`
-	Failures    int     `json:"failures"`
-	HasIssue    bool    `json:"has_issue"`
-	IssueReason string  `json:"issue_reason"`
+	InfoHash        string  `json:"info_hash"`
+	Name            string  `json:"name"`
+	Size            int64   `json:"size"`
+	Uploaded        int64   `json:"uploaded"`
+	SpeedBps        int64   `json:"speed_bps"`
+	Seeders         int     `json:"seeders"`
+	Leechers        int     `json:"leechers"`
+	Ratio           float64 `json:"ratio"`
+	TrackerHost     string  `json:"tracker_host"`
+	TrackerIndex    int     `json:"tracker_index"`
+	TrackerCount    int     `json:"tracker_count"`
+	Failures        int     `json:"failures"`
+	HasIssue        bool    `json:"has_issue"`
+	IssueReason     string  `json:"issue_reason"`
+	LastError       string  `json:"last_error"`
+	LastAnnounceAt  string  `json:"last_announce_at,omitempty"`
+	NextAnnounceAt  string  `json:"next_announce_at,omitempty"`
+	LastIntervalSec int64   `json:"last_interval_seconds"`
+	RetryInSec      int64   `json:"retry_in_seconds"`
+	NextEvent       string  `json:"next_event"`
 }
 
 func NextAfter(event clientemu.Event, interval time.Duration, err error) Result {
@@ -74,15 +83,30 @@ type Scheduler struct {
 
 type announcer struct {
 	torrent      *torrent.Torrent
-	mu           sync.Mutex // 保护 trackerIndex 和 lastError
+	mu           sync.Mutex // 保护 trackerIndex 和状态字段
 	trackerIndex int
 	lastInterval time.Duration
 	failures     int
 	lastError    string // 最后一次失败的错误消息
+	lastAnnounce time.Time
+	nextAnnounce time.Time
+	nextEvent    clientemu.Event
 	started      bool
 	completed    bool // 标记已完成（达到分享率或其他原因停止）
 	parent       context.Context
 	cancel       context.CancelFunc
+}
+
+func (a *announcer) isStarted() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.started
+}
+
+func (a *announcer) markStarted() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.started = true
 }
 
 func New(cfg config.Config, emu *clientemu.Client, tc *tracker.Client, bw *bandwidth.Dispatcher, st *store.Store, log *slog.Logger) *Scheduler {
@@ -120,7 +144,7 @@ func (s *Scheduler) Stop(ctx context.Context) {
 		if a.cancel != nil {
 			a.cancel()
 		}
-		if a.started {
+		if a.isStarted() {
 			list = append(list, a)
 		}
 	}
@@ -147,7 +171,16 @@ func (s *Scheduler) UpdateConfig(cfg config.Config) {
 	s.cfg = cfg
 }
 
+func (s *Scheduler) Config() config.Config {
+	return s.config()
+}
+
 func (s *Scheduler) FillSlots(ctx context.Context) {
+	s.fillSlots(ctx)
+}
+
+func (s *Scheduler) Reconcile(ctx context.Context) {
+	s.stopOverflow(ctx)
 	s.fillSlots(ctx)
 }
 
@@ -155,6 +188,29 @@ func (s *Scheduler) config() config.Config {
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
 	return s.cfg
+}
+
+func (s *Scheduler) stopOverflow(ctx context.Context) {
+	for ctx.Err() == nil {
+		cfg := s.config()
+		s.mu.Lock()
+		overflow := len(s.active) - cfg.SimultaneousSeed
+		if overflow <= 0 {
+			s.mu.Unlock()
+			return
+		}
+		hashes := make([][20]byte, 0, len(s.active))
+		for hash := range s.active {
+			hashes = append(hashes, hash)
+		}
+		s.mu.Unlock()
+		sort.Slice(hashes, func(i, j int) bool {
+			return HashID(hashes[i]) < HashID(hashes[j])
+		})
+		for i := 0; i < overflow && i < len(hashes) && ctx.Err() == nil; i++ {
+			s.stopTorrent(ctx, hashes[i], StopReasonManual)
+		}
+	}
 }
 
 // fillSlots fills available slots with torrents from the store.
@@ -192,7 +248,15 @@ func (s *Scheduler) tryAdd(parent context.Context, t *torrent.Torrent) bool {
 		return false
 	}
 	ctx, cancel := context.WithCancel(parent)
-	a := &announcer{torrent: t, lastInterval: 5 * time.Second, parent: parent, cancel: cancel}
+	now := time.Now()
+	a := &announcer{
+		torrent:      t,
+		lastInterval: 5 * time.Second,
+		nextAnnounce: now,
+		nextEvent:    clientemu.EventStarted,
+		parent:       parent,
+		cancel:       cancel,
+	}
 	s.active[t.InfoHash] = a
 	s.log.Info("torrent scheduled", "name", t.Name, "info_hash", t.InfoHashHex())
 	go s.loop(ctx, a, clientemu.EventStarted, 0)
@@ -204,7 +268,7 @@ func (s *Scheduler) stopTorrent(ctx context.Context, hash [20]byte, reason stopR
 	if a != nil {
 		s.bw.Unregister(a.torrent.InfoHashHex())
 	}
-	if a != nil && a.started {
+	if a != nil && a.isStarted() {
 		// 同步等待 stopped announce 完成
 		s.announce(ctx, a, clientemu.EventStopped)
 	}
@@ -248,31 +312,41 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 		case <-timer.C:
 		}
 		resp, err := s.announce(ctx, a, event)
+		now := time.Now()
 		cfg := s.config()
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			a.failures++
-			// 保存错误信息
 			a.mu.Lock()
+			a.failures++
+			failures := a.failures
 			a.lastError = err.Error()
+			a.lastAnnounce = now
 			a.mu.Unlock()
-			delay := backoffDelay(a.failures, cfg.TrackerFailureBackoffMin(), cfg.TrackerFailureBackoffMax())
-			s.log.Warn("announce failed", "event", eventName(event), "name", a.torrent.Name, "failures", a.failures, "retry_in", delay, "error", err)
+			delay := backoffDelay(failures, cfg.TrackerFailureBackoffMin(), cfg.TrackerFailureBackoffMax())
+			a.mu.Lock()
+			a.nextAnnounce = now.Add(delay)
+			a.nextEvent = event
+			a.mu.Unlock()
+			s.log.Warn("announce failed", "event", eventName(event), "name", a.torrent.Name, "failures", failures, "retry_in", delay, "error", err)
 			timer.Reset(delay)
 			continue
 		} else {
-			a.failures = 0
-			// 清除错误信息
+			interval := a.lastInterval
 			a.mu.Lock()
+			a.failures = 0
 			a.lastError = ""
+			a.lastAnnounce = now
 			a.mu.Unlock()
 			if resp.Interval > 0 {
-				a.lastInterval = time.Duration(resp.Interval) * time.Second
+				interval = time.Duration(resp.Interval) * time.Second
+				a.mu.Lock()
+				a.lastInterval = interval
+				a.mu.Unlock()
 			}
 			if event == clientemu.EventStarted {
-				a.started = true
+				a.markStarted()
 				s.bw.Register(a.torrent.InfoHashHex())
 			}
 			s.bw.UpdatePeers(a.torrent.InfoHashHex(), resp.Seeders, resp.Leechers)
@@ -288,7 +362,12 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 			}
 		}
 		event = clientemu.EventNone
-		timer.Reset(a.lastInterval)
+		a.mu.Lock()
+		interval := a.lastInterval
+		a.nextAnnounce = now.Add(interval)
+		a.nextEvent = event
+		a.mu.Unlock()
+		timer.Reset(interval)
 	}
 }
 
@@ -421,9 +500,24 @@ func (s *Scheduler) Status() []TorrentStatus {
 			ratio = float64(stats.Uploaded) / float64(a.torrent.Size)
 		}
 		trackerHostStr := ""
+		trackerIndex := 0
+		trackerCount := len(a.torrent.AnnounceList)
+		failures := 0
+		lastErr := ""
+		lastAnnounce := time.Time{}
+		nextAnnounce := time.Time{}
+		nextEvent := clientemu.EventNone
+		lastInterval := time.Duration(0)
 		if len(a.torrent.AnnounceList) > 0 {
 			a.mu.Lock()
-			trackerHostStr = trackerHost(a.torrent.AnnounceList[a.trackerIndex%len(a.torrent.AnnounceList)])
+			trackerIndex = a.trackerIndex % len(a.torrent.AnnounceList)
+			trackerHostStr = trackerHost(a.torrent.AnnounceList[trackerIndex])
+			failures = a.failures
+			lastErr = a.lastError
+			lastAnnounce = a.lastAnnounce
+			nextAnnounce = a.nextAnnounce
+			nextEvent = a.nextEvent
+			lastInterval = a.lastInterval
 			a.mu.Unlock()
 		}
 
@@ -431,21 +525,12 @@ func (s *Scheduler) Status() []TorrentStatus {
 		hasIssue := false
 		issueReasons := []string{}
 
-		// 获取最后的错误信息
-		a.mu.Lock()
-		lastErr := a.lastError
-		a.mu.Unlock()
-
-		if a.failures > 0 {
+		if failures > 0 {
 			hasIssue = true
 			if lastErr != "" {
-				// 截取错误信息前 200 个字符避免过长
-				if len(lastErr) > 200 {
-					lastErr = lastErr[:200] + "..."
-				}
-				issueReasons = append(issueReasons, fmt.Sprintf("失败 %d 次: %s", a.failures, lastErr))
+				issueReasons = append(issueReasons, fmt.Sprintf("失败 %d 次: %s", failures, lastErr))
 			} else {
-				issueReasons = append(issueReasons, fmt.Sprintf("连续失败 %d 次", a.failures))
+				issueReasons = append(issueReasons, fmt.Sprintf("连续失败 %d 次", failures))
 			}
 		}
 		if stats.Seeders == 0 && stats.Leechers == 0 {
@@ -460,19 +545,51 @@ func (s *Scheduler) Status() []TorrentStatus {
 		}
 
 		out = append(out, TorrentStatus{
-			InfoHash:    infoHashHex,
-			Name:        a.torrent.Name,
-			Size:        a.torrent.Size,
-			Uploaded:    stats.Uploaded,
-			SpeedBps:    stats.CurrentSpeedBps,
-			Seeders:     stats.Seeders,
-			Leechers:    stats.Leechers,
-			Ratio:       ratio,
-			TrackerHost: trackerHostStr,
-			Failures:    a.failures,
-			HasIssue:    hasIssue,
-			IssueReason: issueReason,
+			InfoHash:        infoHashHex,
+			Name:            a.torrent.Name,
+			Size:            a.torrent.Size,
+			Uploaded:        stats.Uploaded,
+			SpeedBps:        stats.CurrentSpeedBps,
+			Seeders:         stats.Seeders,
+			Leechers:        stats.Leechers,
+			Ratio:           ratio,
+			TrackerHost:     trackerHostStr,
+			TrackerIndex:    trackerIndex,
+			TrackerCount:    trackerCount,
+			Failures:        failures,
+			HasIssue:        hasIssue,
+			IssueReason:     issueReason,
+			LastError:       lastErr,
+			LastAnnounceAt:  formatStatusTime(lastAnnounce),
+			NextAnnounceAt:  formatStatusTime(nextAnnounce),
+			LastIntervalSec: int64(lastInterval.Seconds()),
+			RetryInSec:      secondsUntil(nextAnnounce),
+			NextEvent:       eventName(nextEvent),
 		})
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name == out[j].Name {
+			return out[i].InfoHash < out[j].InfoHash
+		}
+		return out[i].Name < out[j].Name
+	})
 	return out
+}
+
+func formatStatusTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339)
+}
+
+func secondsUntil(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	seconds := int64(time.Until(t).Seconds())
+	if seconds < 0 {
+		return 0
+	}
+	return seconds
 }
