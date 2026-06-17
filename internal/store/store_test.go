@@ -39,6 +39,64 @@ func TestScanAndNotifyDetectsAddedAndRemovedTorrent(t *testing.T) {
 	}
 }
 
+func TestScanAndNotifyDetectsReplacedTorrent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	s := NewWithScanInterval(ctx, dir, "", 0, discardLogger())
+
+	path := filepath.Join(dir, "test.torrent")
+	writeTestTorrent(t, path, "http://tracker.example/announce", "old.bin", 100)
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	added := receiveEvent(t, s)
+	if added.Type != Added || added.Torrent.Name != "old.bin" {
+		t.Fatalf("event after add = %+v, want Added old.bin", added)
+	}
+
+	writeTestTorrent(t, path, "http://tracker.example/announce", "new.bin", 200)
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	removed := receiveEvent(t, s)
+	if removed.Type != Removed || removed.Torrent.Name != "old.bin" {
+		t.Fatalf("event after replace = %+v, want Removed old.bin", removed)
+	}
+	added = receiveEvent(t, s)
+	if added.Type != Added || added.Torrent.Name != "new.bin" {
+		t.Fatalf("event after replace = %+v, want Added new.bin", added)
+	}
+}
+
+func TestScanAndNotifyRemovesOldTorrentWhenReplacementIsInvalid(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	s := NewWithScanInterval(ctx, dir, "", 0, discardLogger())
+
+	path := filepath.Join(dir, "test.torrent")
+	writeTestTorrent(t, path, "http://tracker.example/announce", "old.bin", 100)
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	_ = receiveEvent(t, s)
+
+	if err := os.WriteFile(path, []byte("not bencode"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	removed := receiveEvent(t, s)
+	if removed.Type != Removed || removed.Torrent.Name != "old.bin" {
+		t.Fatalf("event after invalid replace = %+v, want Removed old.bin", removed)
+	}
+	if got := s.Status(); len(got) != 0 {
+		t.Fatalf("store status after invalid replace = %+v, want empty", got)
+	}
+}
+
 func TestPeriodicScanUsesConfiguredInterval(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

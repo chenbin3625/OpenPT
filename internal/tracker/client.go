@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"compress/zlib"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -16,6 +17,8 @@ import (
 
 	"openpt/internal/clientemu"
 )
+
+const maxTrackerResponseBytes = 1 << 20
 
 type Options struct {
 	Timeout             time.Duration
@@ -105,12 +108,13 @@ func (c *Client) Announce(ctx context.Context, baseURL, query string, headers []
 	if err != nil {
 		return Response{}, err
 	}
-	defer resp.Body.Close()
 	body, err := decodedBody(resp)
 	if err != nil {
+		_ = resp.Body.Close()
 		return Response{}, err
 	}
-	data, err := io.ReadAll(body)
+	defer body.Close()
+	data, err := readLimited(body, maxTrackerResponseBytes)
 	if err != nil {
 		return Response{}, err
 	}
@@ -127,17 +131,45 @@ func (c *Client) Announce(ctx context.Context, baseURL, query string, headers []
 	return parsed, nil
 }
 
-func decodedBody(resp *http.Response) (io.Reader, error) {
+func decodedBody(resp *http.Response) (io.ReadCloser, error) {
 	switch strings.ToLower(resp.Header.Get("Content-Encoding")) {
 	case "gzip":
-		return gzip.NewReader(resp.Body)
+		gr, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		return closeBoth{ReadCloser: gr, other: resp.Body}, nil
 	case "deflate":
 		zr, err := zlib.NewReader(resp.Body)
 		if err == nil {
-			return zr, nil
+			return closeBoth{ReadCloser: zr, other: resp.Body}, nil
 		}
-		return flate.NewReader(resp.Body), nil
+		return closeBoth{ReadCloser: flate.NewReader(resp.Body), other: resp.Body}, nil
 	default:
 		return resp.Body, nil
 	}
+}
+
+type closeBoth struct {
+	io.ReadCloser
+	other io.Closer
+}
+
+func (c closeBoth) Close() error {
+	err := c.ReadCloser.Close()
+	if otherErr := c.other.Close(); err == nil {
+		err = otherErr
+	}
+	return err
+}
+
+func readLimited(r io.Reader, maxBytes int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, errors.New("tracker response exceeds size limit")
+	}
+	return data, nil
 }

@@ -34,6 +34,7 @@ type Dispatcher struct {
 	currentRate   int64
 	randomRefresh time.Duration
 	nextRefresh   time.Time
+	lastTick      time.Time
 	stats         map[string]*Stats
 	stop          chan struct{}
 	stopOnce      sync.Once
@@ -58,6 +59,7 @@ func New(cfg Config) *Dispatcher {
 		minRateBps:    cfg.MinRateBps,
 		maxRateBps:    cfg.MaxRateBps,
 		randomRefresh: time.Duration(cfg.RandomRefreshSeconds) * time.Second,
+		lastTick:      time.Now(),
 		stats:         map[string]*Stats{},
 		stop:          make(chan struct{}),
 		rng:           rand.New(rand.NewSource(time.Now().UnixNano())),
@@ -170,15 +172,20 @@ func (d *Dispatcher) tick() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	now := time.Now()
+	if d.lastTick.IsZero() {
+		d.lastTick = now
+	}
+	elapsed := now.Sub(d.lastTick)
+	d.lastTick = now
 	if d.currentRate == 0 || now.After(d.nextRefresh) {
 		d.refreshCurrentRateLocked(now)
 		d.recomputeSpeedsLocked()
 	}
-	if len(d.stats) == 0 {
+	if len(d.stats) == 0 || elapsed <= 0 {
 		return
 	}
 	for _, st := range d.stats {
-		st.Uploaded += st.CurrentSpeedBps
+		st.Uploaded += int64(float64(st.CurrentSpeedBps) * elapsed.Seconds())
 	}
 }
 

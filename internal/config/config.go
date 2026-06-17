@@ -220,6 +220,17 @@ func (c Config) Validate() error {
 	if c.ScanIntervalSeconds < 1 {
 		return errors.New("scan_interval_seconds must be at least 1")
 	}
+	if c.Metrics.Enabled {
+		if !strings.HasPrefix(c.Metrics.Path, "/") {
+			return errors.New("metrics.path must start with /")
+		}
+		if c.Metrics.WebUI {
+			switch c.Metrics.Path {
+			case "/", "/api/status", "/api/config", "/api/events":
+				return fmt.Errorf("metrics.path %q conflicts with web UI routes", c.Metrics.Path)
+			}
+		}
+	}
 	return nil
 }
 
