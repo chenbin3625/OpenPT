@@ -28,52 +28,75 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
             background: var(--bg);
             color: var(--text);
-            line-height: 1.5;
+            line-height: 1.45;
         }
 
         /* Header */
         header {
             background: var(--card);
             border-bottom: 1px solid var(--border);
-            padding: 1.5rem 0;
+            padding: 0.75rem 0;
             position: sticky;
             top: 0;
             z-index: 100;
         }
 
         .container {
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
             padding: 0 1.5rem;
         }
 
+        .header-container {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .main-container {
+            width: 100%;
+            padding: 0 0.75rem 0.75rem;
+        }
+
         h1 {
-            font-size: 1.5rem;
+            font-size: 1.125rem;
             font-weight: 600;
-            margin-bottom: 1rem;
+            white-space: nowrap;
         }
 
         /* Stats Grid */
         .stats {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 1rem;
+            grid-template-columns: repeat(6, minmax(100px, 1fr));
+            gap: 0.5rem;
         }
 
         .stat {
+            min-width: 0;
             display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 0.5rem;
+            padding: 0.375rem 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: 0.375rem;
+            background: var(--bg);
         }
 
         .stat-label {
-            font-size: 0.875rem;
+            font-size: 0.75rem;
             color: var(--text-muted);
+            white-space: nowrap;
         }
 
         .stat-value {
-            font-size: 1.25rem;
+            min-width: 0;
+            font-size: 0.9375rem;
             font-weight: 600;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .stat-value.success { color: var(--success); }
@@ -84,8 +107,9 @@
         .status {
             display: inline-flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 0.375rem;
             font-size: 0.875rem;
+            white-space: nowrap;
         }
 
         .status-dot {
@@ -107,19 +131,20 @@
 
         /* Card */
         .card {
+            width: 100%;
             background: var(--card);
             border-radius: 0.5rem;
             border: 1px solid var(--border);
-            margin-top: 1.5rem;
+            margin-top: 0.75rem;
             overflow: hidden;
         }
 
         .card-header {
-            padding: 1rem 1.25rem;
+            padding: 0.625rem 0.75rem;
             border-bottom: 1px solid var(--border);
             display: flex;
             flex-wrap: wrap;
-            gap: 1rem;
+            gap: 0.75rem;
             align-items: center;
             justify-content: space-between;
         }
@@ -133,7 +158,7 @@
         .toolbar {
             display: flex;
             flex-wrap: wrap;
-            gap: 0.75rem;
+            gap: 0.5rem;
             align-items: center;
         }
 
@@ -146,9 +171,9 @@
         }
 
         .btn {
-            padding: 0.5rem 1rem;
+            padding: 0.375rem 0.625rem;
             border-radius: 0.375rem;
-            font-size: 0.875rem;
+            font-size: 0.8125rem;
             font-weight: 500;
             display: inline-flex;
             align-items: center;
@@ -172,7 +197,7 @@
         }
 
         .btn-icon {
-            padding: 0.5rem;
+            padding: 0.375rem;
             background: none;
             color: var(--text-muted);
         }
@@ -201,12 +226,12 @@
 
         /* Input */
         input[type="text"] {
-            padding: 0.5rem 0.75rem;
+            padding: 0.375rem 0.625rem;
             border: 1px solid var(--border);
             border-radius: 0.375rem;
             font: inherit;
-            font-size: 0.875rem;
-            width: 200px;
+            font-size: 0.8125rem;
+            width: 240px;
         }
 
         input[type="text"]:focus {
@@ -216,18 +241,19 @@
 
         /* Table */
         .table-wrapper {
+            width: 100%;
             overflow-x: auto;
         }
 
         table {
             width: 100%;
-            min-width: 1320px;
+            min-width: 1220px;
             table-layout: fixed;
             border-collapse: collapse;
         }
 
         th {
-            padding: 0.75rem 1rem;
+            padding: 0.5rem 0.625rem;
             text-align: left;
             font-size: 0.75rem;
             font-weight: 600;
@@ -260,10 +286,10 @@
         }
 
         td {
-            padding: 0.75rem 1rem;
+            padding: 0.5rem 0.625rem;
             border-top: 1px solid var(--border);
-            font-size: 0.875rem;
-            vertical-align: top;
+            font-size: 0.8125rem;
+            vertical-align: middle;
         }
 
         tr:hover td {
@@ -290,15 +316,13 @@
         }
 
         .text-truncate {
-            max-width: 350px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
 
         .name-cell {
-            min-width: 260px;
-            max-width: 360px;
+            min-width: 300px;
         }
 
         .primary-text {
@@ -311,7 +335,7 @@
 
         .subtext {
             display: block;
-            margin-top: 0.125rem;
+            margin-top: 0.0625rem;
             color: var(--text-muted);
             font-size: 0.75rem;
             line-height: 1.35;
@@ -325,7 +349,7 @@
             display: flex;
             flex-direction: column;
             align-items: flex-end;
-            gap: 0.125rem;
+            gap: 0.0625rem;
             font-variant-numeric: tabular-nums;
         }
 
@@ -337,10 +361,10 @@
         .status-badge {
             display: inline-flex;
             align-items: center;
-            gap: 0.375rem;
-            padding: 0.25rem 0.75rem;
-            border-radius: 1rem;
-            font-size: 0.8125rem;
+            gap: 0.25rem;
+            padding: 0.1875rem 0.5rem;
+            border-radius: 0.375rem;
+            font-size: 0.75rem;
             font-weight: 500;
         }
 
@@ -360,8 +384,8 @@
         }
 
         .status-icon {
-            width: 0.875rem;
-            height: 0.875rem;
+            width: 0.75rem;
+            height: 0.75rem;
         }
 
         .status-cell {
@@ -369,7 +393,7 @@
             display: inline-flex;
             flex-direction: column;
             align-items: flex-end;
-            gap: 0.25rem;
+            gap: 0.125rem;
         }
 
         .status-detail {
@@ -420,7 +444,7 @@
 
         /* Empty State */
         .empty {
-            padding: 4rem 2rem;
+            padding: 3rem 2rem;
             text-align: center;
             color: var(--text-muted);
         }
@@ -519,6 +543,20 @@
         }
 
         /* Responsive */
+        @media (max-width: 1180px) {
+            .header-container {
+                display: block;
+            }
+
+            h1 {
+                margin-bottom: 0.5rem;
+            }
+
+            .stats {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+        }
+
         @media (max-width: 768px) {
             .container {
                 padding: 0 1rem;
@@ -528,11 +566,20 @@
                 grid-template-columns: repeat(2, 1fr);
             }
 
+            .stat {
+                display: block;
+            }
+
+            .main-container {
+                padding: 0 0.5rem 0.5rem;
+            }
+
             input[type="text"] {
                 width: 100%;
             }
 
             .text-mono,
+            .hash-col,
             .tracker,
             .optional-col {
                 display: none;
@@ -547,7 +594,7 @@
 </head>
 <body>
     <header>
-        <div class="container">
+        <div class="container header-container">
             <h1>OpenPT 监控面板</h1>
             <div class="stats">
                 <div class="stat">
@@ -581,7 +628,7 @@
         </div>
     </header>
 
-    <main class="container">
+    <main class="main-container">
         <div class="card">
             <div class="card-header">
                 <span class="card-title">种子列表</span>
@@ -603,33 +650,31 @@
             <div id="table-wrapper" class="table-wrapper">
                 <table>
                     <colgroup>
-                        <col style="width: 150px;">
-                        <col style="width: 280px;">
+                        <col style="width: 300px;">
+                        <col style="width: 105px;">
+                        <col style="width: 100px;">
                         <col style="width: 110px;">
-                        <col style="width: 120px;">
-                        <col style="width: 110px;">
-                        <col style="width: 90px;">
-                        <col style="width: 90px;">
-                        <col class="optional-col" style="width: 170px;">
-                        <col style="width: 170px;">
-                        <col class="optional-col" style="width: 110px;">
-                        <col style="width: 150px;">
-                        <col class="tracker" style="width: 180px;">
+                        <col style="width: 95px;">
+                        <col style="width: 80px;">
+                        <col style="width: 80px;">
+                        <col style="width: 145px;">
+                        <col class="optional-col" style="width: 90px;">
+                        <col class="tracker" style="width: 160px;">
+                        <col class="hash-col" style="width: 125px;">
                     </colgroup>
                     <thead>
                         <tr>
-                            <th class="sortable" data-sort="info_hash">Info Hash</th>
                             <th class="sortable" data-sort="name">名称</th>
-                            <th class="sortable text-right" data-sort="size">大小</th>
-                            <th class="sortable text-right" data-sort="uploaded">已上传</th>
+                            <th class="sortable text-right" data-sort="failures">状态</th>
                             <th class="sortable text-right" data-sort="speed_bps">速度</th>
+                            <th class="sortable text-right" data-sort="uploaded">已上传</th>
+                            <th class="sortable text-right" data-sort="size">大小</th>
                             <th class="sortable text-right" data-sort="peers_total">Peers</th>
                             <th class="sortable text-right" data-sort="ratio">分享率</th>
-                            <th class="sortable text-right optional-col" data-sort="last_announce_ts">上次上报</th>
                             <th class="sortable text-right" data-sort="next_announce_ts">下次上报</th>
                             <th class="sortable text-right optional-col" data-sort="last_interval_seconds">间隔</th>
-                            <th class="sortable text-right" data-sort="failures">状态</th>
                             <th class="sortable tracker" data-sort="tracker_host">Tracker</th>
+                            <th class="sortable hash-col" data-sort="info_hash">Info Hash</th>
                         </tr>
                     </thead>
                     <tbody id="tbody"></tbody>
@@ -770,34 +815,10 @@
                 : '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>'}
         </svg>`;
 
-        return `<td class="text-mono" title="${esc(t.info_hash)}">${esc(t.info_hash.slice(0, 16))}...</td>
-            <td class="name-cell" title="${esc(t.name)}">
+        return `<td class="name-cell" title="${esc(t.name)}">
                 <span class="primary-text">${esc(t.name)}</span>
                 <span class="subtext">Tracker ${esc(trackerOrdinal)} · ${esc(fmt.event(t.next_event))}</span>
             </td>
-            <td class="text-right">${fmt.bytes(t.size)}</td>
-            <td class="text-right">${fmt.bytes(t.uploaded)}</td>
-            <td class="text-right text-success">${fmt.speed(t.speed_bps)}</td>
-            <td class="text-right">
-                <span class="metric">
-                    <span>${peersTotal}</span>
-                    <span class="subtext">S ${t.seeders || 0} / L ${t.leechers || 0}</span>
-                </span>
-            </td>
-            <td class="text-right ${ratioClass}">${fmt.ratio(t.ratio)}</td>
-            <td class="text-right optional-col">
-                <span class="metric">
-                    <span class="nowrap">${esc(fmt.relative(t.last_announce_at))}</span>
-                    <span class="subtext">${esc(fmt.time(t.last_announce_at))}</span>
-                </span>
-            </td>
-            <td class="text-right">
-                <span class="metric">
-                    <span class="nowrap">${esc(fmt.relative(t.next_announce_at))}</span>
-                    <span class="subtext">${esc(fmt.time(t.next_announce_at))}</span>
-                </span>
-            </td>
-            <td class="text-right optional-col">${esc(fmt.duration(t.last_interval_seconds))}</td>
             <td class="text-right">
                 <span class="status-cell">
                     <span class="status-badge ${statusClass}">
@@ -811,9 +832,29 @@
                     </span>
                 </span>
             </td>
+            <td class="text-right text-success">${fmt.speed(t.speed_bps)}</td>
+            <td class="text-right">${fmt.bytes(t.uploaded)}</td>
+            <td class="text-right">${fmt.bytes(t.size)}</td>
+            <td class="text-right">
+                <span class="metric">
+                    <span>${peersTotal}</span>
+                    <span class="subtext">S ${t.seeders || 0} / L ${t.leechers || 0}</span>
+                </span>
+            </td>
+            <td class="text-right ${ratioClass}">${fmt.ratio(t.ratio)}</td>
+            <td class="text-right">
+                <span class="metric">
+                    <span class="nowrap">${esc(fmt.relative(t.next_announce_at))}</span>
+                    <span class="subtext">${esc(fmt.time(t.next_announce_at))}</span>
+                </span>
+            </td>
+            <td class="text-right optional-col">${esc(fmt.duration(t.last_interval_seconds))}</td>
             <td class="tracker" title="${esc(t.tracker_host)}">
                 <span class="primary-text">${esc(t.tracker_host || '-')}</span>
                 <span class="subtext">${esc(trackerOrdinal)}</span>
+            </td>
+            <td class="text-mono hash-col" title="${esc(t.info_hash)}">
+                <span class="primary-text">${esc(t.info_hash.slice(0, 16))}...</span>
             </td>`;
     };
 
