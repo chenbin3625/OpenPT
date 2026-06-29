@@ -15,7 +15,7 @@ func TestScanAndNotifyDetectsAddedAndRemovedTorrent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dir := t.TempDir()
-	s := NewWithScanInterval(ctx, dir, "", 0, discardLogger())
+	s := NewWithScanInterval(ctx, dir, 0, discardLogger())
 
 	path := filepath.Join(dir, "test.torrent")
 	writeTestTorrent(t, path, "http://tracker.example/announce", "file.bin", 100)
@@ -43,7 +43,7 @@ func TestScanAndNotifyDetectsReplacedTorrent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dir := t.TempDir()
-	s := NewWithScanInterval(ctx, dir, "", 0, discardLogger())
+	s := NewWithScanInterval(ctx, dir, 0, discardLogger())
 
 	path := filepath.Join(dir, "test.torrent")
 	writeTestTorrent(t, path, "http://tracker.example/announce", "old.bin", 100)
@@ -73,7 +73,7 @@ func TestScanAndNotifyRemovesOldTorrentWhenReplacementIsInvalid(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dir := t.TempDir()
-	s := NewWithScanInterval(ctx, dir, "", 0, discardLogger())
+	s := NewWithScanInterval(ctx, dir, 0, discardLogger())
 
 	path := filepath.Join(dir, "test.torrent")
 	writeTestTorrent(t, path, "http://tracker.example/announce", "old.bin", 100)
@@ -101,7 +101,7 @@ func TestPeriodicScanUsesConfiguredInterval(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dir := t.TempDir()
-	s := NewWithScanInterval(ctx, dir, "", 20*time.Millisecond, discardLogger())
+	s := NewWithScanInterval(ctx, dir, 20*time.Millisecond, discardLogger())
 	if err := s.Start(ctx); err != nil {
 		t.Fatal(err)
 	}

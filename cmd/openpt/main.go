@@ -69,7 +69,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	st := store.NewWithScanInterval(ctx, cfg.TorrentsDir, "", cfg.ScanInterval(), log)
+	st := store.NewWithScanInterval(ctx, cfg.TorrentsDir, cfg.ScanInterval(), log)
 	if err := st.Start(ctx); err != nil {
 		log.Error("failed to start torrent store", "error", err)
 		os.Exit(1)
@@ -165,7 +165,7 @@ func startMetricsServer(cfg config.Config, bw *bandwidth.Dispatcher, s *schedule
 	})
 
 	if cfg.Metrics.WebUI {
-		webHandler := web.New(st, s, bw, cfg)
+		webHandler := web.New(st, s, bw)
 		webHandler.RegisterRoutes(mux)
 		log.Info("web UI enabled", "url", "http://"+cfg.Metrics.Listen+"/")
 	}

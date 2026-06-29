@@ -18,7 +18,7 @@ func TestHandleConfigUsesCurrentSchedulerConfig(t *testing.T) {
 		Metrics:          config.MetricsConfig{Enabled: true, WebUI: true, Listen: "127.0.0.1:9090"},
 	}
 	s := scheduler.New(initial, nil, nil, nil, nil, nil)
-	h := New(nil, s, nil, initial)
+	h := New(nil, s, nil)
 
 	next := initial
 	next.Client = "new.client"

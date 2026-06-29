@@ -265,7 +265,7 @@ func (d *Dispatcher) recomputeSpeedsLocked() {
 
 func peersWeight(seeders, leechers int) float64 {
 	if seeders <= 0 && leechers <= 0 {
-		return 1.0 // 无 peers 信息时使用默认权重
+		return 0.1 // 无 peers 信息时使用较小权重，待实际数据到达后调整
 	}
 
 	// 使用局部变量，避免修改输入参数

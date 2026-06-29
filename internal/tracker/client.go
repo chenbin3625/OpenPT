@@ -79,6 +79,7 @@ func newHTTPClient(opts Options) (*http.Client, func(), error) {
 		}
 		tr.Proxy = http.ProxyURL(u)
 	}
+	tr.DisableKeepAlives = !opts.ReuseConnections
 	return &http.Client{Timeout: opts.Timeout, Transport: tr}, tr.CloseIdleConnections, nil
 }
 

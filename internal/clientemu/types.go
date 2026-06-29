@@ -450,7 +450,12 @@ type digitHexAlgorithm struct {
 }
 
 func (a digitHexAlgorithm) Generate() string {
-	n := randInt64(a.max-a.min+1) + a.min
+	span := a.max - a.min
+	if span < 0 {
+		span = 0
+	}
+	// 防止 max - min + 1 溢出
+	n := randInt64(span+1) + a.min
 	return strconv.FormatInt(n, 16)
 }
 

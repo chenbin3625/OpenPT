@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -36,11 +37,11 @@ type Store struct {
 	events       chan Event
 }
 
-func New(ctx context.Context, torrentsDir, archiveDir string, log *slog.Logger) *Store {
-	return NewWithScanInterval(ctx, torrentsDir, archiveDir, 5*time.Second, log)
+func New(ctx context.Context, torrentsDir string, log *slog.Logger) *Store {
+	return NewWithScanInterval(ctx, torrentsDir, 5*time.Second, log)
 }
 
-func NewWithScanInterval(ctx context.Context, torrentsDir, archiveDir string, scanInterval time.Duration, log *slog.Logger) *Store {
+func NewWithScanInterval(ctx context.Context, torrentsDir string, scanInterval time.Duration, log *slog.Logger) *Store {
 	return &Store{
 		ctx:          ctx,
 		torrentsDir:  torrentsDir,
@@ -86,7 +87,7 @@ func (s *Store) List() []*torrent.Torrent {
 }
 
 func (s *Store) Start(ctx context.Context) error {
-	if err := torrent.EnsureDirs(s.torrentsDir, ""); err != nil {
+	if err := torrent.EnsureDirs(s.torrentsDir); err != nil {
 		return err
 	}
 	if err := s.scan(); err != nil {
@@ -153,17 +154,19 @@ func (s *Store) scanDir(notify bool) error {
 			s.loadFileQuiet(path)
 		}
 	}
-	if notify {
-		var missing []string
-		s.mu.RLock()
-		for path := range s.byPath {
-			if !seen[path] {
-				missing = append(missing, path)
-			}
+	var missing []string
+	s.mu.RLock()
+	for path := range s.byPath {
+		if !seen[path] {
+			missing = append(missing, path)
 		}
-		s.mu.RUnlock()
-		for _, path := range missing {
+	}
+	s.mu.RUnlock()
+	for _, path := range missing {
+		if notify {
 			s.removeFile(path)
+		} else {
+			s.removeFileQuiet(path)
 		}
 	}
 	return nil
@@ -217,7 +220,7 @@ func (s *Store) loadFile(path string) {
 	old := s.byPath[path]
 	s.byPath[path] = t
 	s.mu.Unlock()
-	if old != nil && old.InfoHash == t.InfoHash {
+	if old != nil && old.InfoHash == t.InfoHash && slices.Equal(old.AnnounceList, t.AnnounceList) {
 		return
 	}
 	if old != nil {
