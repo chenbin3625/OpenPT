@@ -188,7 +188,7 @@ func TestReplacingTorrentFileStopsOldTorrentAndStartsNewOne(t *testing.T) {
 	writeTestTorrent(t, path, recorder.URL, "old.bin", 100)
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	st := store.NewWithScanInterval(ctx, torrentsDir, "", 20*time.Millisecond, log)
+	st := store.NewWithScanInterval(ctx, torrentsDir, 20*time.Millisecond, log)
 	if err := st.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func newTestScheduler(t *testing.T, ctx context.Context, announce string, simult
 		writeTestTorrent(t, filepath.Join(torrentsDir, fmt.Sprintf("torrent-%d.torrent", i)), announce, fmt.Sprintf("file-%d.bin", i), int64(100+i))
 	}
 	log := slog.New(slog.NewTextHandler(testLogWriter{t: t}, nil))
-	st := store.New(ctx, torrentsDir, "", log)
+	st := store.New(ctx, torrentsDir, log)
 	if err := st.Start(ctx); err != nil {
 		t.Fatal(err)
 	}

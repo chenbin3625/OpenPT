@@ -265,12 +265,12 @@ func (s *Scheduler) tryAdd(parent context.Context, t *torrent.Torrent) bool {
 
 func (s *Scheduler) stopTorrent(ctx context.Context, hash [20]byte, reason stopReason) {
 	a := s.removeActive(hash)
-	if a != nil {
-		s.bw.Unregister(a.torrent.InfoHashHex())
-	}
 	if a != nil && a.isStarted() {
 		// 同步等待 stopped announce 完成
 		s.announce(ctx, a, clientemu.EventStopped)
+	}
+	if a != nil {
+		s.bw.Unregister(a.torrent.InfoHashHex())
 	}
 
 	// 只在非分享率目标原因时清除 completed 标记
@@ -489,11 +489,22 @@ func HashID(hash [20]byte) string { return hex.EncodeToString(hash[:]) }
 
 // Status returns the status of all active torrents.
 func (s *Scheduler) Status() []TorrentStatus {
+	// 快照 active map 后释放调度器锁，避免阻塞新增/删除操作
+	type snapshot struct {
+		a            *announcer
+		infoHashHex  string
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]TorrentStatus, 0, len(s.active))
+	snapshots := make([]snapshot, 0, len(s.active))
 	for _, a := range s.active {
-		infoHashHex := a.torrent.InfoHashHex()
+		snapshots = append(snapshots, snapshot{a: a, infoHashHex: a.torrent.InfoHashHex()})
+	}
+	s.mu.Unlock()
+
+	out := make([]TorrentStatus, 0, len(snapshots))
+	for _, snap := range snapshots {
+		a := snap.a
+		infoHashHex := snap.infoHashHex
 		stats := s.bw.Get(infoHashHex)
 		ratio := float64(0)
 		if a.torrent.Size > 0 && stats.Uploaded > 0 {
@@ -521,7 +532,6 @@ func (s *Scheduler) Status() []TorrentStatus {
 			a.mu.Unlock()
 		}
 
-		// Determine issue status and reason
 		hasIssue := false
 		issueReasons := []string{}
 

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"openpt/internal/bandwidth"
-	"openpt/internal/config"
 	"openpt/internal/scheduler"
 	"openpt/internal/store"
 )
@@ -41,7 +40,7 @@ type Handler struct {
 }
 
 // New creates a new web Handler.
-func New(st *store.Store, s *scheduler.Scheduler, bw *bandwidth.Dispatcher, cfg config.Config) *Handler {
+func New(st *store.Store, s *scheduler.Scheduler, bw *bandwidth.Dispatcher) *Handler {
 	return &Handler{
 		store:     st,
 		scheduler: s,
@@ -148,30 +147,55 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
+	var lastHash uint64
+
 	// Send initial status
-	h.sendStatus(w, flusher)
+	if !h.sendStatusIfChanged(w, flusher, &lastHash) {
+		return
+	}
 
 	for {
 		select {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
-			h.sendStatus(w, flusher)
+			if !h.sendStatusIfChanged(w, flusher, &lastHash) {
+				return
+			}
 		}
 	}
 }
 
-func (h *Handler) sendStatus(w http.ResponseWriter, flusher http.Flusher) {
+func (h *Handler) sendStatusIfChanged(w http.ResponseWriter, flusher http.Flusher, lastHash *uint64) bool {
 	resp := StatusResponse{
 		Torrents: h.scheduler.Status(),
 	}
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return
+		return true
 	}
-	fmt.Fprintf(w, "data: %s\n\n", data)
+	// 仅数据变更时才推送
+	hash := hashBytes(data)
+	if hash == *lastHash {
+		return true
+	}
+	*lastHash = hash
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+		return false
+	}
 	flusher.Flush()
+	return true
+}
+
+// hashBytes computes a simple FNV-1a hash for change detection.
+func hashBytes(data []byte) uint64 {
+	var h uint64 = 14695981039346656037
+	for _, b := range data {
+		h ^= uint64(b)
+		h *= 1099511628211
+	}
+	return h
 }

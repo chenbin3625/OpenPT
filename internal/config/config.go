@@ -161,7 +161,9 @@ func randomAnnouncePort() int {
 	span := randomAnnouncePortMax - randomAnnouncePortMin + 1
 	n, err := rand.Int(rand.Reader, big.NewInt(int64(span)))
 	if err != nil {
-		return randomAnnouncePortMin + int(time.Now().UnixNano()%int64(span))
+		// 应急回退：混合时间戳和进程 ID 提升不可预测性
+		seed := time.Now().UnixNano() ^ int64(os.Getpid())<<16
+		return randomAnnouncePortMin + int(seed%int64(span))
 	}
 	return randomAnnouncePortMin + int(n.Int64())
 }
@@ -243,7 +245,11 @@ func (c Config) TrackerIdleConnTimeout() time.Duration {
 }
 
 func (c Config) TrackerReuseConnections() bool {
-	return c.Tracker.ReuseConnections == nil || *c.Tracker.ReuseConnections
+	// 防御性 nil 检查：未经 applyDefaults 直接构造的配置默认为 true
+	if c.Tracker.ReuseConnections == nil {
+		return true
+	}
+	return *c.Tracker.ReuseConnections
 }
 
 func (c Config) TrackerFailureBackoffMin() time.Duration {

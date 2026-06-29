@@ -53,7 +53,7 @@ func (t Torrent) InfoHashHex() string {
 	return hex.EncodeToString(t.InfoHash[:])
 }
 
-func EnsureDirs(torrentsDir, archiveDir string) error {
+func EnsureDirs(torrentsDir string) error {
 	if err := os.MkdirAll(torrentsDir, 0o755); err != nil {
 		return err
 	}
