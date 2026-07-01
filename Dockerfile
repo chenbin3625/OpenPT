@@ -31,7 +31,8 @@ COPY examples /app/examples
 COPY clients /app/clients
 COPY docker/entrypoint.sh /usr/local/bin/openpt-entrypoint
 
-RUN chmod +x /usr/local/bin/openpt-entrypoint
+RUN chmod +x /usr/local/bin/openpt-entrypoint && \
+    find /data/torrents -mindepth 1 -delete 2>/dev/null || true
 
 VOLUME ["/data"]
 ENTRYPOINT ["openpt-entrypoint"]

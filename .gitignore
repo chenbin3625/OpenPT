@@ -1,2 +1,10 @@
 /openpt
 /torrents/
+*.torrent
+config.toml
+*.log
+tmp/
+dist/
+data/
+.env
+*.env
