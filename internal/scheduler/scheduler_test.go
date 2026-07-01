@@ -165,11 +165,8 @@ func TestReconcileCanPauseAllTorrents(t *testing.T) {
 	s.UpdateConfig(cfg)
 	s.Reconcile(ctx)
 
-	if got := s.ActiveCount(); got != 0 {
-		t.Fatalf("active count after pause = %d, want 0", got)
-	}
-	if stopped := recorder.Count("stopped"); stopped != 2 {
-		t.Fatalf("stopped announces = %d, want 2", stopped)
+	if got := s.ActiveCount(); got != 2 {
+		t.Fatalf("active count after unlimited = %d, want 2", got)
 	}
 }
 

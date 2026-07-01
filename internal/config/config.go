@@ -101,10 +101,10 @@ func (c *Config) applyDefaults(configPath string) {
 	if c.ClientsDir == "" {
 		c.ClientsDir = filepath.Join(root, "clients")
 	}
-	// simultaneous_seed 可以为 0（暂停所有做种）
+	// simultaneous_seed 可以为 0（无限制，全量加载）
 	// 只在负数时才设置默认值
 	if c.SimultaneousSeed < 0 {
-		c.SimultaneousSeed = 1
+		c.SimultaneousSeed = 0
 	}
 	if c.Announce.Port == 0 {
 		c.Announce.Port = randomAnnouncePort()
