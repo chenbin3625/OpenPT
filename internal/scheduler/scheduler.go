@@ -191,8 +191,12 @@ func (s *Scheduler) config() config.Config {
 }
 
 func (s *Scheduler) stopOverflow(ctx context.Context) {
+	cfg := s.config()
+	if cfg.SimultaneousSeed <= 0 {
+		return
+	}
 	for ctx.Err() == nil {
-		cfg := s.config()
+		cfg = s.config()
 		s.mu.Lock()
 		overflow := len(s.active) - cfg.SimultaneousSeed
 		if overflow <= 0 {
@@ -219,7 +223,7 @@ func (s *Scheduler) fillSlots(parent context.Context) {
 	for parent.Err() == nil {
 		cfg := s.config()
 		s.mu.Lock()
-		if len(s.active) >= cfg.SimultaneousSeed {
+		if cfg.SimultaneousSeed > 0 && len(s.active) >= cfg.SimultaneousSeed {
 			s.mu.Unlock()
 			return
 		}
@@ -244,7 +248,7 @@ func (s *Scheduler) tryAdd(parent context.Context, t *torrent.Torrent) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cfg := s.config()
-	if _, ok := s.active[t.InfoHash]; ok || len(s.active) >= cfg.SimultaneousSeed {
+	if _, ok := s.active[t.InfoHash]; ok || (cfg.SimultaneousSeed > 0 && len(s.active) >= cfg.SimultaneousSeed) {
 		return false
 	}
 	ctx, cancel := context.WithCancel(parent)
