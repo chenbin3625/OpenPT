@@ -143,9 +143,10 @@ func TestReconcileStopsExcessTorrents(t *testing.T) {
 	if got := s.ActiveCount(); got != 1 {
 		t.Fatalf("active count after decrease = %d, want 1", got)
 	}
-	if stopped := recorder.Count("stopped"); stopped != 2 {
-		t.Fatalf("stopped announces = %d, want 2", stopped)
-	}
+	// stopped announce 为异步发送，需等待完成
+	waitUntil(t, func() bool {
+		return recorder.Count("stopped") == 2
+	})
 }
 
 func TestReconcileCanPauseAllTorrents(t *testing.T) {

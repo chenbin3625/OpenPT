@@ -79,6 +79,10 @@ type Scheduler struct {
 	mu        sync.Mutex
 	active    map[[20]byte]*announcer
 	completed map[[20]byte]bool // 已完成的种子，不再重新添加
+
+	// stoppedSem 限制并发 stopped announce 数量；stoppedWG 用于停机时等待在途的异步 stopped announce
+	stoppedSem chan struct{}
+	stoppedWG  sync.WaitGroup
 }
 
 type announcer struct {
@@ -92,7 +96,6 @@ type announcer struct {
 	nextAnnounce time.Time
 	nextEvent    clientemu.Event
 	started      bool
-	completed    bool // 标记已完成（达到分享率或其他原因停止）
 	parent       context.Context
 	cancel       context.CancelFunc
 }
@@ -112,8 +115,9 @@ func (a *announcer) markStarted() {
 func New(cfg config.Config, emu *clientemu.Client, tc *tracker.Client, bw *bandwidth.Dispatcher, st *store.Store, log *slog.Logger) *Scheduler {
 	return &Scheduler{
 		cfg: cfg, client: emu, tracker: tc, bw: bw, store: st, log: log,
-		active:    map[[20]byte]*announcer{},
-		completed: map[[20]byte]bool{},
+		active:     map[[20]byte]*announcer{},
+		completed:  map[[20]byte]bool{},
+		stoppedSem: make(chan struct{}, 8),
 	}
 }
 
@@ -162,6 +166,13 @@ func (s *Scheduler) Stop(ctx context.Context) {
 	select {
 	case <-ctx.Done():
 	case <-done:
+	}
+	// 等待因种子移除而触发的在途异步 stopped announce，避免停机时漏发
+	stoppedDone := make(chan struct{})
+	go func() { s.stoppedWG.Wait(); close(stoppedDone) }()
+	select {
+	case <-ctx.Done():
+	case <-stoppedDone:
 	}
 }
 
@@ -270,8 +281,8 @@ func (s *Scheduler) tryAdd(parent context.Context, t *torrent.Torrent) bool {
 func (s *Scheduler) stopTorrent(ctx context.Context, hash [20]byte, reason stopReason) {
 	a := s.removeActive(hash)
 	if a != nil && a.isStarted() {
-		// 同步等待 stopped announce 完成
-		s.announce(ctx, a, clientemu.EventStopped)
+		// 异步发送 stopped announce，避免阻塞事件循环（批量删除时尤其重要）
+		s.sendStoppedAsync(ctx, a)
 	}
 	if a != nil {
 		s.bw.Unregister(a.torrent.InfoHashHex())
@@ -284,6 +295,29 @@ func (s *Scheduler) stopTorrent(ctx context.Context, hash [20]byte, reason stopR
 	}
 
 	s.fillSlots(ctx)
+}
+
+// sendStoppedAsync 在并发受限的 goroutine 中发送 stopped announce。
+// 使用传入的 ctx（调度器根 ctx）：announcer 自身的 ctx 已被 removeActive 取消，
+// 而根 ctx 在正常运行期间存活、停机时取消以中断在途请求。单次请求时长由 tracker
+// HTTP 客户端的 Timeout 兜底，无需额外 context 超时（避免配置为 0 时立即超时）。
+func (s *Scheduler) sendStoppedAsync(ctx context.Context, a *announcer) {
+	s.stoppedWG.Add(1)
+	go func() {
+		defer s.stoppedWG.Done()
+		select {
+		case s.stoppedSem <- struct{}{}:
+			defer func() { <-s.stoppedSem }()
+		case <-ctx.Done():
+			return
+		}
+		if _, err := s.announce(ctx, a, clientemu.EventStopped); err != nil {
+			// ctx 已取消时的失败属于停机正常路径，不记录告警
+			if ctx.Err() == nil {
+				s.log.Warn("async stopped announce failed", "name", a.torrent.Name, "error", err)
+			}
+		}
+	}()
 }
 
 // clearCompleted 清除 completed 标记，允许种子重新添加
@@ -337,6 +371,12 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 			timer.Reset(delay)
 			continue
 		} else {
+			// announce 成功返回后，ctx 可能已被并发的 stopTorrent 取消。
+			// 此时 stopTorrent 已负责清理（removeActive/Unregister/Stopped），
+			// 这里直接退出，避免再次 Register 造成 bw 条目泄漏。
+			if ctx.Err() != nil {
+				return
+			}
 			interval := a.lastInterval
 			a.mu.Lock()
 			a.failures = 0
@@ -354,12 +394,6 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 				s.bw.Register(a.torrent.InfoHashHex())
 			}
 			s.bw.UpdatePeers(a.torrent.InfoHashHex(), resp.Seeders, resp.Leechers)
-			if event == clientemu.EventStopped {
-				s.bw.Unregister(a.torrent.InfoHashHex())
-				s.removeActive(a.torrent.InfoHash)
-				s.fillSlots(a.fillContext(ctx))
-				return
-			}
 			if ratioReached(cfg.Uploaded.RatioTarget, a.torrent.Size, s.bw.Get(a.torrent.InfoHashHex()).Uploaded) {
 				s.completeTorrent(ctx, a, cfg.Uploaded.RatioTarget)
 				return
@@ -415,13 +449,14 @@ func (s *Scheduler) ActiveCount() int {
 
 func (s *Scheduler) completeTorrent(ctx context.Context, a *announcer, ratioTarget float64) {
 	s.log.Info("ratio target reached; completing torrent", "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex(), "ratio_target", ratioTarget)
-	if _, err := s.announce(ctx, a, clientemu.EventStopped); err != nil {
-		s.log.Warn("failed to send stopped announce after ratio target", "name", a.torrent.Name, "error", err)
-	}
 	// 标记为已完成，防止重新添加
 	s.markCompleted(a.torrent.InfoHash)
 	s.bw.Unregister(a.torrent.InfoHashHex())
 	s.removeActive(a.torrent.InfoHash)
+	// removeActive 后 announcer 自身 ctx 已取消，异步发送 stopped announce
+	if a.isStarted() {
+		s.sendStoppedAsync(ctx, a)
+	}
 	s.fillSlots(a.fillContext(ctx))
 }
 
@@ -472,7 +507,7 @@ func eventName(e clientemu.Event) string {
 
 func trackerHost(raw string) string {
 	for _, prefix := range []string{"http://", "https://"} {
-		raw = stringsTrimPrefix(raw, prefix)
+		raw = strings.TrimPrefix(raw, prefix)
 	}
 	for i, ch := range raw {
 		if ch == '/' || ch == '?' {
@@ -480,13 +515,6 @@ func trackerHost(raw string) string {
 		}
 	}
 	return raw
-}
-
-func stringsTrimPrefix(s, prefix string) string {
-	if len(s) >= len(prefix) && s[:len(prefix)] == prefix {
-		return s[len(prefix):]
-	}
-	return s
 }
 
 func HashID(hash [20]byte) string { return hex.EncodeToString(hash[:]) }
