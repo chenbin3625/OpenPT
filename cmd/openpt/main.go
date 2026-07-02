@@ -69,7 +69,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	st := store.NewWithScanInterval(ctx, cfg.TorrentsDir, cfg.ScanInterval(), log)
+	st := store.NewWithScanInterval(ctx, cfg.TorrentsDir, cfg.ArchiveDir, cfg.ScanInterval(), log)
 	if err := st.Start(ctx); err != nil {
 		log.Error("failed to start torrent store", "error", err)
 		os.Exit(1)
