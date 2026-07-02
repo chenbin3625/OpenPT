@@ -21,6 +21,11 @@ client = "qbittorrent-5.1.4.client"
 # 所有要保种的 .torrent 文件放在这里
 torrents_dir = "./torrents"
 
+# 归档目录
+# 加载失败（损坏/无法解析）的种子会被移动到这里，便于整理问题种子，不会被删除。
+# 留空则使用默认值 torrents_dir 的同级 torrents_archive 目录。
+archive_dir = "./torrents_archive"
+
 # 客户端配置文件目录
 # 存放 BitTorrent 客户端模拟配置文件（.client 文件）
 clients_dir = "./clients"

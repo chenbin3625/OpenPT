@@ -15,7 +15,7 @@ func TestScanAndNotifyDetectsAddedAndRemovedTorrent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dir := t.TempDir()
-	s := NewWithScanInterval(ctx, dir, 0, discardLogger())
+	s := NewWithScanInterval(ctx, dir, "", 0, discardLogger())
 
 	path := filepath.Join(dir, "test.torrent")
 	writeTestTorrent(t, path, "http://tracker.example/announce", "file.bin", 100)
@@ -43,7 +43,7 @@ func TestScanAndNotifyDetectsReplacedTorrent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dir := t.TempDir()
-	s := NewWithScanInterval(ctx, dir, 0, discardLogger())
+	s := NewWithScanInterval(ctx, dir, "", 0, discardLogger())
 
 	path := filepath.Join(dir, "test.torrent")
 	writeTestTorrent(t, path, "http://tracker.example/announce", "old.bin", 100)
@@ -69,11 +69,11 @@ func TestScanAndNotifyDetectsReplacedTorrent(t *testing.T) {
 	}
 }
 
-func TestScanAndNotifyRemovesOldTorrentWhenReplacementIsInvalid(t *testing.T) {
+func TestInvalidReplacementKeepsOldTorrentAndDoesNotDeleteFile(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dir := t.TempDir()
-	s := NewWithScanInterval(ctx, dir, 0, discardLogger())
+	s := NewWithScanInterval(ctx, dir, "", 0, discardLogger())
 
 	path := filepath.Join(dir, "test.torrent")
 	writeTestTorrent(t, path, "http://tracker.example/announce", "old.bin", 100)
@@ -82,18 +82,161 @@ func TestScanAndNotifyRemovesOldTorrentWhenReplacementIsInvalid(t *testing.T) {
 	}
 	_ = receiveEvent(t, s)
 
+	// 用无效内容覆盖（模拟 Docker bind-mount 下的 partial write / 损坏文件）
 	if err := os.WriteFile(path, []byte("not bencode"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.scanAndNotify(); err != nil {
 		t.Fatal(err)
 	}
+
+	// 不应产生 Removed 事件：旧种子保持加载，等待下次扫描重试（避免误删/误停）
+	select {
+	case ev := <-s.Events():
+		t.Fatalf("unexpected event after invalid replace = %+v", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// 文件不应被删除
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("invalid torrent file was deleted: %v", err)
+	}
+
+	// 旧种子仍在 store 中
+	if got := s.Status(); len(got) != 1 || got[0].Name != "old.bin" {
+		t.Fatalf("store status after invalid replace = %+v, want [old.bin]", got)
+	}
+}
+
+func TestScanDoesNotDeletePartialTorrentFile(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	s := NewWithScanInterval(ctx, dir, "", 0, discardLogger())
+
+	// 模拟正在写入的半成品种子文件
+	path := filepath.Join(dir, "partial.torrent")
+	if err := os.WriteFile(path, []byte("d8:announce"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+
+	// partial read 不应导致文件被删除
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("partial torrent file was deleted: %v", err)
+	}
+	// 不应产生 Added 事件
+	select {
+	case ev := <-s.Events():
+		t.Fatalf("unexpected event for partial torrent = %+v", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestFailedTorrentArchived(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	archiveDir := filepath.Join(dir, "archive")
+	s := NewWithScanInterval(ctx, dir, archiveDir, 0, discardLogger())
+
+	path := filepath.Join(dir, "broken.torrent")
+	if err := os.WriteFile(path, []byte("not bencode"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 文件应被移动到归档目录，原位置不再存在
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected broken torrent moved out of torrents dir, got err=%v", err)
+	}
+	entries, err := os.ReadDir(archiveDir)
+	if err != nil {
+		t.Fatalf("archive dir not created: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "broken.torrent" {
+		t.Fatalf("archive entries = %+v, want [broken.torrent]", entries)
+	}
+	// 不应产生 Added 事件
+	select {
+	case ev := <-s.Events():
+		t.Fatalf("unexpected event for broken torrent = %+v", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestInvalidReplacementArchivedAndOldRemoved(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	archiveDir := filepath.Join(dir, "archive")
+	s := NewWithScanInterval(ctx, dir, archiveDir, 0, discardLogger())
+
+	path := filepath.Join(dir, "test.torrent")
+	writeTestTorrent(t, path, "http://tracker.example/announce", "old.bin", 100)
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	_ = receiveEvent(t, s) // Added old.bin
+
+	if err := os.WriteFile(path, []byte("not bencode"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 旧种子应被移除并发出 Removed 事件
 	removed := receiveEvent(t, s)
 	if removed.Type != Removed || removed.Torrent.Name != "old.bin" {
 		t.Fatalf("event after invalid replace = %+v, want Removed old.bin", removed)
 	}
+	// 无效文件应被归档
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected invalid torrent archived (moved out), got err=%v", err)
+	}
 	if got := s.Status(); len(got) != 0 {
 		t.Fatalf("store status after invalid replace = %+v, want empty", got)
+	}
+}
+
+func TestArchiveNameCollisionDoesNotOverwrite(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	archiveDir := filepath.Join(dir, "archive")
+	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// 归档目录已有同名文件
+	if err := os.WriteFile(filepath.Join(archiveDir, "broken.torrent"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := NewWithScanInterval(ctx, dir, archiveDir, 0, discardLogger())
+
+	path := filepath.Join(dir, "broken.torrent")
+	if err := os.WriteFile(path, []byte("not bencode"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 新归档文件应使用带后缀的名字，原归档文件保留
+	entries, err := os.ReadDir(archiveDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, e := range entries {
+		names[e.Name()] = true
+	}
+	if !names["broken.torrent"] || !names["broken.1.torrent"] {
+		t.Fatalf("archive entries = %+v, want both broken.torrent and broken.1.torrent", names)
 	}
 }
 
@@ -101,7 +244,7 @@ func TestPeriodicScanUsesConfiguredInterval(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dir := t.TempDir()
-	s := NewWithScanInterval(ctx, dir, 20*time.Millisecond, discardLogger())
+	s := NewWithScanInterval(ctx, dir, "", 20*time.Millisecond, discardLogger())
 	if err := s.Start(ctx); err != nil {
 		t.Fatal(err)
 	}

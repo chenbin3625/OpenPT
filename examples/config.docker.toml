@@ -17,6 +17,9 @@ client = "qbittorrent-5.1.4.client"
 torrents_dir = "/data/torrents"
 clients_dir = "/data/clients"
 
+# 加载失败的种子归档目录（不会被删除，便于整理问题种子）
+archive_dir = "/data/torrents_archive"
+
 
 # ========== 其他配置 ==========
 

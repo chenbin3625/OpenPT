@@ -15,6 +15,7 @@ import (
 
 type Config struct {
 	TorrentsDir                string         `toml:"torrents_dir"`
+	ArchiveDir                 string         `toml:"archive_dir"`
 	ClientsDir                 string         `toml:"clients_dir"`
 	Client                     string         `toml:"client"`
 	SimultaneousSeed           int            `toml:"simultaneous_seed"`
@@ -98,6 +99,10 @@ func (c *Config) applyDefaults(configPath string) {
 	if c.TorrentsDir == "" {
 		c.TorrentsDir = filepath.Join(root, "torrents")
 	}
+	if c.ArchiveDir == "" {
+		// 默认归档到种子目录的同级目录，便于整理加载失败的种子
+		c.ArchiveDir = filepath.Join(filepath.Dir(c.TorrentsDir), "torrents_archive")
+	}
 	if c.ClientsDir == "" {
 		c.ClientsDir = filepath.Join(root, "clients")
 	}
@@ -174,6 +179,9 @@ func (c Config) Validate() error {
 	}
 	if c.SimultaneousSeed < 0 {
 		return errors.New("simultaneous_seed must not be negative")
+	}
+	if err := validateArchiveDir(c.TorrentsDir, c.ArchiveDir); err != nil {
+		return err
 	}
 	if c.Announce.Port < 1 || c.Announce.Port > 65535 {
 		return errors.New("announce.port must be in 1..65535")
@@ -270,4 +278,32 @@ func (c Config) ScanInterval() time.Duration {
 
 func (c Config) ShutdownStopTimeout() time.Duration {
 	return time.Duration(c.ShutdownStopTimeoutSeconds) * time.Second
+}
+
+// validateArchiveDir 确保 archive_dir 不与 torrents_dir 相同或位于其内部，
+// 避免归档的种子被重新扫描导致循环。
+func validateArchiveDir(torrentsDir, archiveDir string) error {
+	if archiveDir == "" {
+		return nil
+	}
+	td, err := filepath.Abs(filepath.Clean(torrentsDir))
+	if err != nil {
+		return err
+	}
+	ad, err := filepath.Abs(filepath.Clean(archiveDir))
+	if err != nil {
+		return err
+	}
+	if ad == td {
+		return errors.New("archive_dir must not be the same as torrents_dir")
+	}
+	rel, err := filepath.Rel(td, ad)
+	if err != nil {
+		return err
+	}
+	// rel 不以 ".." 开头时，archive 位于 torrents 内部
+	if !strings.HasPrefix(rel, "..") {
+		return errors.New("archive_dir must not be inside torrents_dir")
+	}
+	return nil
 }
