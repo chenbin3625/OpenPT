@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"openpt/internal/bandwidth"
@@ -94,7 +95,7 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 		{Key: "announce.ip", Label: "上报 IPv4 地址", Value: defaultStr(cfg.Announce.IP, "自动检测")},
 		{Key: "announce.ipv6", Label: "上报 IPv6 地址", Value: defaultStr(cfg.Announce.IPv6, "自动检测")},
 		{Key: "tracker.timeout_seconds", Label: "Tracker 超时", Value: fmt.Sprintf("%d 秒", cfg.Tracker.TimeoutSeconds)},
-		{Key: "tracker.proxy", Label: "代理地址", Value: defaultStr(cfg.Tracker.Proxy, "无")},
+		{Key: "tracker.proxy", Label: "代理地址", Value: defaultStr(redactProxy(cfg.Tracker.Proxy), "无")},
 		{Key: "tracker.reuse_connections", Label: "复用连接", Value: boolToStr(cfg.TrackerReuseConnections())},
 		{Key: "uploaded.strategy", Label: "上传策略", Value: strategy},
 		{Key: "uploaded.configured_rate_bps", Label: "配置速率", Value: formatBps(cfg.Uploaded.ConfiguredRateBps)},
@@ -120,6 +121,23 @@ func defaultStr(s, def string) string {
 		return def
 	}
 	return s
+}
+
+// redactProxy 去除代理 URL 中的密码，避免在 Web UI 中泄漏凭据。
+func redactProxy(proxy string) string {
+	if proxy == "" {
+		return ""
+	}
+	u, err := url.Parse(proxy)
+	if err != nil {
+		// 无法解析时返回不包含凭据的占位，避免泄漏
+		return "(已配置)"
+	}
+	if u.User != nil {
+		// 仅保留用户名，去除密码
+		u.User = url.User(u.User.Username())
+	}
+	return u.String()
 }
 
 func formatBps(bps int64) string {

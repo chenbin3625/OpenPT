@@ -99,6 +99,11 @@ func (c *Client) Announce(ctx context.Context, baseURL, query string, headers []
 	reuseConnections := c.reuseConnections
 	c.mu.RUnlock()
 	for _, h := range headers {
+		// net/http 会忽略 Header 中的 Host，必须通过 req.Host 设置
+		if strings.EqualFold(h.Name, "Host") {
+			req.Host = h.Value
+			continue
+		}
 		if reuseConnections && strings.EqualFold(h.Name, "Connection") && strings.EqualFold(h.Value, "close") {
 			continue
 		}
