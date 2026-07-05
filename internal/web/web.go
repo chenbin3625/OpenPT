@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -15,6 +16,14 @@ import (
 
 //go:embed index.html
 var indexHTML []byte
+
+const (
+	// sseStatusPollInterval 是 SSE 端点检查状态是否变化并推送的间隔。
+	sseStatusPollInterval = 2 * time.Second
+	// defaultSSEHeartbeatInterval 是 SSE 心跳间隔。长时间无数据变化时，
+	// 中间代理 / 浏览器可能断开空闲连接，定期发送注释行保持连接活跃。
+	defaultSSEHeartbeatInterval = 15 * time.Second
+)
 
 // StatusResponse represents the full status response.
 type StatusResponse struct {
@@ -35,17 +44,19 @@ type ConfigResponse struct {
 
 // Handler provides HTTP handlers for the web UI.
 type Handler struct {
-	store     *store.Store
-	scheduler *scheduler.Scheduler
-	bw        *bandwidth.Dispatcher
+	store             *store.Store
+	scheduler         *scheduler.Scheduler
+	bw                *bandwidth.Dispatcher
+	heartbeatInterval time.Duration
 }
 
 // New creates a new web Handler.
 func New(st *store.Store, s *scheduler.Scheduler, bw *bandwidth.Dispatcher) *Handler {
 	return &Handler{
-		store:     st,
-		scheduler: s,
-		bw:        bw,
+		store:             st,
+		scheduler:         s,
+		bw:                bw,
+		heartbeatInterval: defaultSSEHeartbeatInterval,
 	}
 }
 
@@ -71,7 +82,9 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	resp := StatusResponse{
 		Torrents: h.scheduler.Status(),
 	}
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("web: failed to encode status response: %v", err)
+	}
 }
 
 func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +119,9 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 		{Key: "metrics.webui", Label: "Web UI", Value: boolToStr(cfg.Metrics.WebUI)},
 	}
 
-	json.NewEncoder(w).Encode(ConfigResponse{Items: items})
+	if err := json.NewEncoder(w).Encode(ConfigResponse{Items: items}); err != nil {
+		log.Printf("web: failed to encode config response: %v", err)
+	}
 }
 
 func boolToStr(b bool) string {
@@ -165,8 +180,10 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(sseStatusPollInterval)
 	defer ticker.Stop()
+	heartbeat := time.NewTicker(h.heartbeatInterval)
+	defer heartbeat.Stop()
 
 	var lastHash uint64
 
@@ -183,6 +200,12 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if !h.sendStatusIfChanged(w, flusher, &lastHash) {
 				return
 			}
+		case <-heartbeat.C:
+			// SSE 注释行（以冒号开头），客户端 EventSource 会忽略，仅用于保持连接活跃
+			if _, err := fmt.Fprintf(w, ": keep-alive\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
 		}
 	}
 }

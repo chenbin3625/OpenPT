@@ -171,6 +171,24 @@ func TestReconcileCanPauseAllTorrents(t *testing.T) {
 	}
 }
 
+func TestMinIntervalOverridesSmallerInterval(t *testing.T) {
+	// tracker 返回 interval=1 但 min interval=3，调度器应采用较大值 3，避免过于频繁上报
+	server := trackerResponseServer("d8:intervali1e12:min intervali3e8:completei2e10:incompletei1ee")
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := newTestScheduler(t, ctx, server.URL, 1, 1)
+	s.fillSlots(ctx)
+	waitUntil(t, func() bool {
+		return s.ActiveCount() == 1
+	})
+	waitUntil(t, func() bool {
+		status := s.Status()
+		return len(status) == 1 && status[0].LastIntervalSec == 3
+	})
+}
+
 func TestReplacingTorrentFileStopsOldTorrentAndStartsNewOne(t *testing.T) {
 	recorder := newTrackerEventRecorder("d8:intervali3600e8:completei2e10:incompletei1ee")
 	defer recorder.Close()

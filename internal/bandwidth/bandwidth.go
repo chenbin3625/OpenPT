@@ -15,6 +15,12 @@ type Stats struct {
 	Leechers        int
 }
 
+// maxTickElapsed 限制单次 tick 累计上传量的时间上限。
+// 进程被挂起（笔记本休眠 / 容器 pause）后恢复时，elapsed 可能长达数小时；
+// 若按实际 elapsed 累加，会一次性产生数 GB 的不自然上传尖峰，对伪造上传的 PT 保种场景
+// 极易被站点判定为作弊。超过该上限时按上限计算，等价于"挂起期间不伪造上传"。
+const maxTickElapsed = 2 * time.Second
+
 type Config struct {
 	Strategy             string
 	ConservativeRateBps  int64
@@ -177,6 +183,9 @@ func (d *Dispatcher) tick() {
 	}
 	elapsed := now.Sub(d.lastTick)
 	d.lastTick = now
+	if elapsed > maxTickElapsed {
+		elapsed = maxTickElapsed
+	}
 	if d.currentRate == 0 || now.After(d.nextRefresh) {
 		d.refreshCurrentRateLocked(now)
 		d.recomputeSpeedsLocked()

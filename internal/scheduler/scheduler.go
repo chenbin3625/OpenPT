@@ -27,6 +27,10 @@ const (
 	StopReasonRatioTarget                   // 达到分享率目标
 )
 
+// maxConcurrentStopped 限制并发 stopped announce 的数量，避免批量删除种子时
+// 瞬间打出大量 stopped 请求淹没 tracker。
+const maxConcurrentStopped = 8
+
 type Result struct {
 	NextEvent clientemu.Event
 	Delay     time.Duration
@@ -117,7 +121,7 @@ func New(cfg config.Config, emu *clientemu.Client, tc *tracker.Client, bw *bandw
 		cfg: cfg, client: emu, tracker: tc, bw: bw, store: st, log: log,
 		active:     map[[20]byte]*announcer{},
 		completed:  map[[20]byte]bool{},
-		stoppedSem: make(chan struct{}, 8),
+		stoppedSem: make(chan struct{}, maxConcurrentStopped),
 	}
 }
 
@@ -377,14 +381,20 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 			if ctx.Err() != nil {
 				return
 			}
-			interval := a.lastInterval
 			a.mu.Lock()
 			a.failures = 0
 			a.lastError = ""
 			a.lastAnnounce = now
+			interval := a.lastInterval
 			a.mu.Unlock()
-			if resp.Interval > 0 {
-				interval = time.Duration(resp.Interval) * time.Second
+			// 遵守 tracker 的 min interval：取 interval 与 min interval 的较大值，
+			// 避免过于频繁上报被站点 ban。
+			intervalSeconds := resp.Interval
+			if resp.MinInterval > intervalSeconds {
+				intervalSeconds = resp.MinInterval
+			}
+			if intervalSeconds > 0 {
+				interval = time.Duration(intervalSeconds) * time.Second
 				a.mu.Lock()
 				a.lastInterval = interval
 				a.mu.Unlock()
@@ -523,8 +533,8 @@ func HashID(hash [20]byte) string { return hex.EncodeToString(hash[:]) }
 func (s *Scheduler) Status() []TorrentStatus {
 	// 快照 active map 后释放调度器锁，避免阻塞新增/删除操作
 	type snapshot struct {
-		a            *announcer
-		infoHashHex  string
+		a           *announcer
+		infoHashHex string
 	}
 	s.mu.Lock()
 	snapshots := make([]snapshot, 0, len(s.active))

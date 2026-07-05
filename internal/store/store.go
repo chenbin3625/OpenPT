@@ -22,6 +22,14 @@ import (
 // 文件仍在写入（partial read）导致的瞬时解析失败。
 const loadRetryDelay = 500 * time.Millisecond
 
+// watcherSettleDelay 是 fsnotify 触发 Create/Write 后、读取文件前的等待，
+// 让 Docker bind-mount 等场景下仍在写入的文件落盘，避免 partial read。
+const watcherSettleDelay = 300 * time.Millisecond
+
+// eventBufferSize 是 store 事件 channel 的缓冲容量。
+// 调度器持续消费事件，缓冲主要吸收扫描/批量删除时的瞬时尖峰。
+const eventBufferSize = 256
+
 type EventType int
 
 const (
@@ -57,7 +65,7 @@ func NewWithScanInterval(ctx context.Context, torrentsDir, archiveDir string, sc
 		scanInterval: scanInterval,
 		log:          log,
 		byPath:       map[string]*torrent.Torrent{},
-		events:       make(chan Event, 256), // 增加缓冲区避免阻塞
+		events:       make(chan Event, eventBufferSize), // 增加缓冲区避免阻塞
 	}
 }
 
@@ -123,7 +131,7 @@ func (s *Store) Start(ctx context.Context) error {
 				return
 			case ev := <-w.Events:
 				if torrent.IsTorrentPath(ev.Name) && (ev.Has(fsnotify.Create) || ev.Has(fsnotify.Write)) {
-					time.Sleep(300 * time.Millisecond)
+					time.Sleep(watcherSettleDelay)
 					s.loadFile(ev.Name)
 				}
 				if torrent.IsTorrentPath(ev.Name) && (ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename)) {
@@ -309,7 +317,12 @@ func moveFile(src, dst string) error {
 		// 回退也失败时返回 rename 的原始错误
 		return err
 	}
-	return os.Remove(src)
+	if err := os.Remove(src); err != nil {
+		// copy 已成功但 src 删除失败：回滚 dst，避免 src 与 dst 同时存在导致下次扫描重复归档
+		_ = os.Remove(dst)
+		return err
+	}
+	return nil
 }
 
 func copyFile(src, dst string) error {
@@ -324,6 +337,8 @@ func copyFile(src, dst string) error {
 	}
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
+		// 清理半成品 dst，避免归档目录残留损坏文件
+		_ = os.Remove(dst)
 		return err
 	}
 	return out.Close()

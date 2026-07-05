@@ -1,10 +1,14 @@
 package web
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"openpt/internal/config"
 	"openpt/internal/scheduler"
@@ -48,4 +52,38 @@ func TestHandleConfigUsesCurrentSchedulerConfig(t *testing.T) {
 	if items["uploaded.configured_rate_bps"] != "2.00 KB/s" {
 		t.Fatalf("configured_rate item = %q, want 2.00 KB/s", items["uploaded.configured_rate_bps"])
 	}
+}
+
+// TestSSEEmitsHeartbeat 验证 SSE 端点在无数据变化时仍定期发送心跳注释行，
+// 防止中间代理 / 浏览器因空闲断开连接。
+func TestSSEEmitsHeartbeat(t *testing.T) {
+	s := scheduler.New(config.Config{
+		Client:   "x",
+		Uploaded: config.UploadedConfig{Strategy: "none"},
+		Metrics:  config.MetricsConfig{Enabled: true, WebUI: true},
+	}, nil, nil, nil, nil, nil)
+	h := New(nil, s, nil)
+	h.heartbeatInterval = 30 * time.Millisecond
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/events", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		if strings.HasPrefix(scanner.Text(), ": keep-alive") {
+			return // 收到心跳，测试通过
+		}
+	}
+	t.Fatal("did not receive SSE heartbeat within timeout")
 }

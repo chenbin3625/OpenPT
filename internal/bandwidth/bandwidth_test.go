@@ -104,3 +104,24 @@ func forceElapsed(d *Dispatcher, elapsed time.Duration) {
 	defer d.mu.Unlock()
 	d.lastTick = time.Now().Add(-elapsed)
 }
+
+// TestTickCapsUploadedAfterSuspend 验证进程挂起恢复后不会一次性累加巨额上传量。
+// elapsed=1h 应被截断到 maxTickElapsed(2s)，避免产生不自然的上传尖峰。
+func TestTickCapsUploadedAfterSuspend(t *testing.T) {
+	d := New(Config{
+		Strategy:          "configured_rate",
+		ConfiguredRateBps: 1000,
+		MinRateBps:        1000,
+		MaxRateBps:        1000,
+	})
+	d.Register("hash")
+	// 模拟进程挂起 1 小时后恢复
+	forceElapsed(d, time.Hour)
+	d.tick()
+
+	st := d.Get("hash")
+	// 1000 Bps * 2s = 2000，而非 1000 * 3600 = 3,600,000
+	if st.Uploaded > 2100 || st.Uploaded < 1900 {
+		t.Fatalf("uploaded = %d after suspend, want about 2000 (capped at 2s)", st.Uploaded)
+	}
+}
