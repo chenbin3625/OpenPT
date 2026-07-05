@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"os"
 	"regexp"
@@ -22,6 +23,10 @@ const (
 	EventStarted Event = "started"
 	EventStopped Event = "stopped"
 )
+
+// persistentGeneratorTTL 是 TORRENT_PERSISTENT 策略下每个种子缓存值的存活时间。
+// 超过后清理，避免长期运行后 perTorrent map 无限增长。
+const persistentGeneratorTTL = 120 * time.Minute
 
 type Header struct {
 	Name  string `json:"name"`
@@ -374,7 +379,7 @@ func (g *Generator) Get(infoHash string, event Event) string {
 		}
 		g.perTorrentTouch[infoHash] = now
 		for k, touched := range g.perTorrentTouch {
-			if now.Sub(touched) >= 120*time.Minute {
+			if now.Sub(touched) >= persistentGeneratorTTL {
 				delete(g.perTorrent, k)
 				delete(g.perTorrentTouch, k)
 			}
@@ -491,6 +496,8 @@ func randInt(max int) int {
 	}
 	n, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
 	if err != nil {
+		// crypto/rand 失败极罕见；记录告警便于观测，降级返回 0 不阻断生成流程
+		log.Printf("clientemu: crypto/rand failed for randInt(%d): %v; falling back to 0", max, err)
 		return 0
 	}
 	return int(n.Int64())
@@ -502,6 +509,7 @@ func randInt64(max int64) int64 {
 	}
 	n, err := rand.Int(rand.Reader, big.NewInt(max))
 	if err != nil {
+		log.Printf("clientemu: crypto/rand failed for randInt64(%d): %v; falling back to 0", max, err)
 		return 0
 	}
 	return n.Int64()

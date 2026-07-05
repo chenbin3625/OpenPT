@@ -7,14 +7,20 @@ import (
 )
 
 type Response struct {
-	Interval int
-	Seeders  int
-	Leechers int
-	Failure  string
+	Interval    int
+	MinInterval int
+	Seeders     int
+	Leechers    int
+	Failure     string
 }
 
+// maxBencodeDepth 限制 bencode 解析的最大嵌套深度，防止恶意/异常的深层嵌套响应
+// 耗尽 goroutine 栈内存。tracker 响应已被 maxTrackerResponseBytes 限制为 1MB，
+// 但纯嵌套结构（如 "dddd..."）仍可产生数十万层递归。
+const maxBencodeDepth = 200
+
 func ParseResponse(data []byte) (Response, error) {
-	v, rest, err := parseValue(data)
+	v, rest, err := parseValue(data, 0)
 	if err != nil {
 		return Response{}, err
 	}
@@ -27,6 +33,7 @@ func ParseResponse(data []byte) (Response, error) {
 	}
 	var r Response
 	r.Interval = intValue(dict["interval"])
+	r.MinInterval = intValue(dict["min interval"])
 	r.Seeders = intValue(dict["complete"]) - 1
 	if r.Seeders < 0 {
 		r.Seeders = 0
@@ -38,7 +45,10 @@ func ParseResponse(data []byte) (Response, error) {
 	return r, nil
 }
 
-func parseValue(data []byte) (any, []byte, error) {
+func parseValue(data []byte, depth int) (any, []byte, error) {
+	if depth > maxBencodeDepth {
+		return nil, nil, fmt.Errorf("bencode nesting too deep (>%d)", maxBencodeDepth)
+	}
 	if len(data) == 0 {
 		return nil, nil, fmt.Errorf("unexpected end of bencode")
 	}
@@ -57,7 +67,7 @@ func parseValue(data []byte) (any, []byte, error) {
 		out := map[string]any{}
 		rest := data[1:]
 		for len(rest) > 0 && rest[0] != 'e' {
-			k, next, err := parseValue(rest)
+			k, next, err := parseValue(rest, depth+1)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -65,7 +75,7 @@ func parseValue(data []byte) (any, []byte, error) {
 			if !ok {
 				return nil, nil, fmt.Errorf("dictionary key is not string")
 			}
-			val, next, err := parseValue(next)
+			val, next, err := parseValue(next, depth+1)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -80,7 +90,7 @@ func parseValue(data []byte) (any, []byte, error) {
 		var out []any
 		rest := data[1:]
 		for len(rest) > 0 && rest[0] != 'e' {
-			v, next, err := parseValue(rest)
+			v, next, err := parseValue(rest, depth+1)
 			if err != nil {
 				return nil, nil, err
 			}

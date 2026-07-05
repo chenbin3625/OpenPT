@@ -260,6 +260,42 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+// TestMoveFileRollsBackOnRemoveFailure 验证：当 Rename 失败、copyFile 成功、
+// 但删除 src 失败时（如源目录只读），dst 会被回滚，避免文件重复。
+// 在 src 所在目录设为只读时：Rename 需要写源目录 → 失败；
+// Remove(src) 需要写源目录 → 失败；copyFile 打开 src 读 + 在可写 dst 目录创建 → 成功。
+func TestMoveFileRollsBackOnRemoveFailure(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	src := filepath.Join(srcDir, "src.torrent")
+	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 源目录设为只读：禁止 unlink/rename，但允许读取已有文件
+	if err := os.Chmod(srcDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(srcDir, 0o755) // 恢复可写，让 tempdir 清理正常
+	})
+
+	dst := filepath.Join(dstDir, "dst.torrent")
+	err := moveFile(src, dst)
+	if err == nil {
+		t.Fatal("expected moveFile to fail when src directory is read-only")
+	}
+
+	// src 应仍存在（Remove 失败）
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("src should still exist after rollback, got err=%v", err)
+	}
+	// dst 应已被回滚清理（避免重复）
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Fatalf("dst should be rolled back (removed), got err=%v", err)
+	}
+}
+
 func receiveEvent(t *testing.T, s *Store) Event {
 	t.Helper()
 	return receiveEventBefore(t, s, time.Second)
