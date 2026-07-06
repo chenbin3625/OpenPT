@@ -106,11 +106,7 @@ func (c *Config) applyDefaults(configPath string) {
 	if c.ClientsDir == "" {
 		c.ClientsDir = filepath.Join(root, "clients")
 	}
-	// simultaneous_seed 可以为 0（无限制，全量加载）
-	// 只在负数时才设置默认值
-	if c.SimultaneousSeed < 0 {
-		c.SimultaneousSeed = 0
-	}
+	// simultaneous_seed 可以为 0（无限制，全量加载），负数交给 Validate 报错。
 	if c.Announce.Port == 0 {
 		c.Announce.Port = randomAnnouncePort()
 	}
@@ -301,8 +297,8 @@ func validateArchiveDir(torrentsDir, archiveDir string) error {
 	if err != nil {
 		return err
 	}
-	// rel 不以 ".." 开头时，archive 位于 torrents 内部
-	if !strings.HasPrefix(rel, "..") {
+	// rel 是 "." 或不以 ".." 路径段开头时，archive 位于 torrents 内部。
+	if rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
 		return errors.New("archive_dir must not be inside torrents_dir")
 	}
 	return nil

@@ -64,6 +64,29 @@ scan_interval_seconds = -1
 	}
 }
 
+func TestNegativeSimultaneousSeedFails(t *testing.T) {
+	path := writeConfigTOML(t, `
+client = "qbittorrent.client"
+simultaneous_seed = -1
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected negative simultaneous_seed to fail")
+	}
+}
+
+func TestArchiveDirInsideTorrentsDirFails(t *testing.T) {
+	for _, archiveDir := range []string{"./torrents/archive", "./torrents/..bad_archive"} {
+		path := writeConfigTOML(t, `
+client = "qbittorrent.client"
+torrents_dir = "./torrents"
+archive_dir = "`+archiveDir+`"
+`)
+		if _, err := Load(path); err == nil {
+			t.Fatalf("expected archive_dir %q inside torrents_dir to fail", archiveDir)
+		}
+	}
+}
+
 func TestInvalidMetricsPathFailsWhenMetricsEnabled(t *testing.T) {
 	path := writeConfigTOML(t, `
 client = "qbittorrent.client"

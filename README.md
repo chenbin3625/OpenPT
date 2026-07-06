@@ -141,7 +141,7 @@ file = ""
 
 ### 核心配置
 
-`simultaneous_seed`：同时保种数量。设置为 `0` 可暂停所有做种。
+`simultaneous_seed`：同时保种数量。设置为 `0` 表示不限制数量，会尽量加载目录中的全部种子。
 
 `client`：客户端伪装文件名，需要存在于 `clients_dir` 目录中。
 
