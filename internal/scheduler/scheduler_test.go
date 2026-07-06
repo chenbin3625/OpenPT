@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -149,7 +148,7 @@ func TestReconcileStopsExcessTorrents(t *testing.T) {
 	})
 }
 
-func TestReconcileCanPauseAllTorrents(t *testing.T) {
+func TestReconcileKeepsAllTorrentsWhenLimitIsZero(t *testing.T) {
 	recorder := newTrackerEventRecorder("d8:intervali3600e8:completei2e10:incompletei1ee")
 	defer recorder.Close()
 
@@ -254,7 +253,7 @@ func newTestScheduler(t *testing.T, ctx context.Context, announce string, simult
 	for i := 0; i < torrents; i++ {
 		writeTestTorrent(t, filepath.Join(torrentsDir, fmt.Sprintf("torrent-%d.torrent", i)), announce, fmt.Sprintf("file-%d.bin", i), int64(100+i))
 	}
-	log := slog.New(slog.NewTextHandler(testLogWriter{t: t}, nil))
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	st := store.New(ctx, torrentsDir, "", log)
 	if err := st.Start(ctx); err != nil {
 		t.Fatal(err)
@@ -287,15 +286,6 @@ func newTestClient() (*clientemu.Client, error) {
 		Query:      "info_hash={info_hash}&peer_id={peer_id}&port={port}&uploaded={uploaded}&downloaded={downloaded}&left={left}&event={event}&numwant={numwant}",
 		Numwant:    1,
 	})
-}
-
-type testLogWriter struct {
-	t *testing.T
-}
-
-func (w testLogWriter) Write(p []byte) (int, error) {
-	w.t.Log(strings.TrimSpace(string(p)))
-	return len(p), nil
 }
 
 func trackerResponseServer(response string) *httptest.Server {

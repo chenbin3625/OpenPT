@@ -101,22 +101,36 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 	items := []ConfigItem{
 		{Key: "torrents_dir", Label: "种子目录", Value: cfg.TorrentsDir},
+		{Key: "archive_dir", Label: "归档目录", Value: cfg.ArchiveDir},
 		{Key: "clients_dir", Label: "客户端配置目录", Value: cfg.ClientsDir},
 		{Key: "client", Label: "客户端伪装", Value: cfg.Client},
-		{Key: "simultaneous_seed", Label: "同时保种数量", Value: fmt.Sprintf("%d", cfg.SimultaneousSeed)},
+		{Key: "simultaneous_seed", Label: "同时保种数量", Value: formatSeedLimit(cfg.SimultaneousSeed)},
+		{Key: "scan_interval_seconds", Label: "扫描间隔", Value: formatSeconds(cfg.ScanIntervalSeconds)},
+		{Key: "shutdown_stop_timeout_seconds", Label: "关闭等待停止上报", Value: formatSeconds(cfg.ShutdownStopTimeoutSeconds)},
 		{Key: "announce.port", Label: "Announce 端口", Value: fmt.Sprintf("%d", cfg.Announce.Port)},
 		{Key: "announce.ip", Label: "上报 IPv4 地址", Value: defaultStr(cfg.Announce.IP, "自动检测")},
 		{Key: "announce.ipv6", Label: "上报 IPv6 地址", Value: defaultStr(cfg.Announce.IPv6, "自动检测")},
 		{Key: "tracker.timeout_seconds", Label: "Tracker 超时", Value: fmt.Sprintf("%d 秒", cfg.Tracker.TimeoutSeconds)},
 		{Key: "tracker.proxy", Label: "代理地址", Value: defaultStr(redactProxy(cfg.Tracker.Proxy), "无")},
 		{Key: "tracker.reuse_connections", Label: "复用连接", Value: boolToStr(cfg.TrackerReuseConnections())},
+		{Key: "tracker.max_idle_conns", Label: "最大空闲连接数", Value: fmt.Sprintf("%d", cfg.Tracker.MaxIdleConns)},
+		{Key: "tracker.max_idle_conns_per_host", Label: "单 Host 最大空闲连接数", Value: fmt.Sprintf("%d", cfg.Tracker.MaxIdleConnsPerHost)},
+		{Key: "tracker.idle_conn_timeout_seconds", Label: "空闲连接超时", Value: formatSeconds(cfg.Tracker.IdleConnTimeoutSeconds)},
+		{Key: "tracker.failure_backoff_min_seconds", Label: "失败最小退避", Value: formatSeconds(cfg.Tracker.FailureBackoffMinSeconds)},
+		{Key: "tracker.failure_backoff_max_seconds", Label: "失败最大退避", Value: formatSeconds(cfg.Tracker.FailureBackoffMaxSeconds)},
 		{Key: "uploaded.strategy", Label: "上传策略", Value: strategy},
 		{Key: "uploaded.configured_rate_bps", Label: "配置速率", Value: formatBps(cfg.Uploaded.ConfiguredRateBps)},
 		{Key: "uploaded.min_rate_bps", Label: "最小速率", Value: formatBps(cfg.Uploaded.MinRateBps)},
 		{Key: "uploaded.max_rate_bps", Label: "最大速率", Value: formatBps(cfg.Uploaded.MaxRateBps)},
+		{Key: "uploaded.conservative_rate_bps", Label: "保守速率", Value: formatBps(cfg.Uploaded.ConservativeRateBps)},
+		{Key: "uploaded.random_jitter_percent", Label: "随机抖动", Value: fmt.Sprintf("%d%%", cfg.Uploaded.RandomJitterPercent)},
+		{Key: "uploaded.random_refresh_seconds", Label: "随机速率刷新", Value: formatSeconds(cfg.Uploaded.RandomRefreshSeconds)},
 		{Key: "uploaded.ratio_target", Label: "目标分享率", Value: formatRatioTarget(cfg.Uploaded.RatioTarget)},
+		{Key: "metrics.enabled", Label: "监控服务", Value: boolToStr(cfg.Metrics.Enabled)},
 		{Key: "metrics.listen", Label: "监控服务地址", Value: cfg.Metrics.Listen},
+		{Key: "metrics.path", Label: "指标路径", Value: cfg.Metrics.Path},
 		{Key: "metrics.webui", Label: "Web UI", Value: boolToStr(cfg.Metrics.WebUI)},
+		{Key: "logging.file", Label: "日志文件", Value: defaultStr(cfg.Logging.File, "标准输出")},
 	}
 
 	if err := json.NewEncoder(w).Encode(ConfigResponse{Items: items}); err != nil {
@@ -136,6 +150,17 @@ func defaultStr(s, def string) string {
 		return def
 	}
 	return s
+}
+
+func formatSeedLimit(n int) string {
+	if n == 0 {
+		return "不限制（0）"
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+func formatSeconds(seconds int) string {
+	return fmt.Sprintf("%d 秒", seconds)
 }
 
 // redactProxy 去除代理 URL 中的密码，避免在 Web UI 中泄漏凭据。
