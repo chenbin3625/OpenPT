@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"openpt/internal/clientemu"
 	"openpt/internal/config"
 	"openpt/internal/store"
+	torrentpkg "openpt/internal/torrent"
 	"openpt/internal/tracker"
 )
 
@@ -170,6 +172,138 @@ func TestReconcileKeepsAllTorrentsWhenLimitIsZero(t *testing.T) {
 	}
 }
 
+func TestCompleteTorrentSendsStoppedWithParentContext(t *testing.T) {
+	recorder := newTrackerEventRecorder("d8:intervali3600e8:completei2e10:incompletei1ee")
+	defer recorder.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := newTestScheduler(t, ctx, recorder.URL, 1, 1)
+	s.fillSlots(ctx)
+	waitUntil(t, func() bool {
+		return recorder.Count("started") == 1
+	})
+
+	a := activeAnnouncer(t, s)
+	canceledCtx, cancelCanceledCtx := context.WithCancel(context.Background())
+	cancelCanceledCtx()
+	s.completeTorrent(canceledCtx, a, 1.0)
+
+	waitUntil(t, func() bool {
+		return recorder.Count("stopped") == 1
+	})
+}
+
+func TestStopTorrentSendsStoppedWithUploadedSnapshot(t *testing.T) {
+	recorder := newTrackerEventRecorder("d8:intervali1e8:completei2e10:incompletei1ee")
+	defer recorder.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := newTestScheduler(t, ctx, recorder.URL, 1, 1)
+	s.bw.UpdateConfig(bandwidth.Config{Strategy: "configured_rate", ConfiguredRateBps: 2048, RandomRefreshSeconds: 1})
+	s.bw.Start()
+	defer s.bw.Stop()
+	s.fillSlots(ctx)
+
+	waitUntil(t, func() bool {
+		status := s.Status()
+		return len(status) == 1 && status[0].Uploaded > 0
+	})
+	first := activeHash(t, s)
+	uploadedBeforeStop := s.Status()[0].Uploaded
+	s.stopTorrent(ctx, first, StopReasonManual)
+
+	waitUntil(t, func() bool {
+		return recorder.Count("stopped") == 1
+	})
+	if got := recorder.LastUploaded("stopped"); got <= 0 {
+		t.Fatalf("stopped uploaded = %d, want > 0 (uploaded before stop was %d)", got, uploadedBeforeStop)
+	}
+}
+
+func TestStopLimitsConcurrentStoppedAnnounces(t *testing.T) {
+	total := maxConcurrentStopped + 4
+	recorder := newTrackerEventRecorderWithStoppedDelay("d8:intervali3600e8:completei2e10:incompletei1ee", 80*time.Millisecond)
+	defer recorder.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := newTestScheduler(t, ctx, recorder.URL, total, total)
+	s.fillSlots(ctx)
+	waitUntil(t, func() bool {
+		return recorder.Count("started") == total
+	})
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer stopCancel()
+	s.Stop(stopCtx)
+
+	if got := recorder.Count("stopped"); got != total {
+		t.Fatalf("stopped announces = %d, want %d", got, total)
+	}
+	if got := recorder.MaxStoppedConcurrent(); got > maxConcurrentStopped {
+		t.Fatalf("max concurrent stopped announces = %d, want <= %d", got, maxConcurrentStopped)
+	}
+}
+
+func TestPersistedCompletedTorrentIsNotRescheduled(t *testing.T) {
+	server := trackerResponseServer("d8:intervali3600e8:completei2e10:incompletei1ee")
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	torrentsDir := filepath.Join(dir, "torrents")
+	if err := os.MkdirAll(torrentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(torrentsDir, "done.torrent")
+	writeTestTorrent(t, path, server.URL, "done.bin", 100)
+	loaded, err := torrentpkg.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "state.json")
+	writeStateFile(t, stateFile, loaded.InfoHashHex(), 1234, true)
+
+	s := newTestSchedulerWithState(t, ctx, server.URL, torrentsDir, stateFile)
+	s.fillSlots(ctx)
+	if got := s.ActiveCount(); got != 0 {
+		t.Fatalf("active count = %d, want 0 for completed persisted torrent", got)
+	}
+}
+
+func TestPersistedUploadedIsRestoredForStartedAnnounce(t *testing.T) {
+	recorder := newTrackerEventRecorder("d8:intervali3600e8:completei2e10:incompletei1ee")
+	defer recorder.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	torrentsDir := filepath.Join(dir, "torrents")
+	if err := os.MkdirAll(torrentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(torrentsDir, "restore.torrent")
+	writeTestTorrent(t, path, recorder.URL, "restore.bin", 100)
+	loaded, err := torrentpkg.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "state.json")
+	writeStateFile(t, stateFile, loaded.InfoHashHex(), 321, false)
+
+	s := newTestSchedulerWithState(t, ctx, recorder.URL, torrentsDir, stateFile)
+	s.fillSlots(ctx)
+	waitUntil(t, func() bool {
+		return recorder.Count("started") == 1
+	})
+	if got := recorder.LastUploaded("started"); got != 321 {
+		t.Fatalf("started uploaded = %d, want restored value 321", got)
+	}
+}
+
 func TestMinIntervalOverridesSmallerInterval(t *testing.T) {
 	// tracker 返回 interval=1 但 min interval=3，调度器应采用较大值 3，避免过于频繁上报
 	server := trackerResponseServer("d8:intervali1e12:min intervali3e8:completei2e10:incompletei1ee")
@@ -243,6 +377,39 @@ func TestReplacingTorrentFileStopsOldTorrentAndStartsNewOne(t *testing.T) {
 	})
 }
 
+func newTestSchedulerWithState(t *testing.T, ctx context.Context, announce, torrentsDir, stateFile string) *Scheduler {
+	t.Helper()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st := store.New(ctx, torrentsDir, "", log)
+	if err := st.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	tc, err := tracker.New(tracker.Options{Timeout: time.Second, ReuseConnections: true, MaxIdleConns: 10, MaxIdleConnsPerHost: 10, IdleConnTimeout: time.Second}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emu, err := newTestClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bw := bandwidth.New(bandwidth.Config{})
+	return New(config.Config{
+		StateFile:        stateFile,
+		SimultaneousSeed: 1,
+		Announce:         config.AnnounceConfig{Port: 6881},
+		Tracker:          config.TrackerConfig{FailureBackoffMinSeconds: 1, FailureBackoffMaxSeconds: 1},
+		Uploaded:         config.UploadedConfig{Strategy: "none"},
+	}, emu, tc, bw, st, log)
+}
+
+func writeStateFile(t *testing.T, path, infoHash string, uploaded int64, completed bool) {
+	t.Helper()
+	data := fmt.Sprintf(`{"torrents":{%q:{"uploaded":%d,"completed":%t}}}`, infoHash, uploaded, completed)
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func newTestScheduler(t *testing.T, ctx context.Context, announce string, simultaneousSeed, torrents int) *Scheduler {
 	t.Helper()
 	dir := t.TempDir()
@@ -296,16 +463,36 @@ func trackerResponseServer(response string) *httptest.Server {
 
 type trackerEventRecorder struct {
 	*httptest.Server
-	mu     sync.Mutex
-	counts map[string]int
+	mu             sync.Mutex
+	counts         map[string]int
+	uploaded       map[string]int64
+	stoppedDelay   time.Duration
+	currentStopped int
+	maxStopped     int
 }
 
 func newTrackerEventRecorder(response string) *trackerEventRecorder {
-	recorder := &trackerEventRecorder{counts: map[string]int{}}
+	return newTrackerEventRecorderWithStoppedDelay(response, 0)
+}
+
+func newTrackerEventRecorderWithStoppedDelay(response string, stoppedDelay time.Duration) *trackerEventRecorder {
+	recorder := &trackerEventRecorder{counts: map[string]int{}, uploaded: map[string]int64{}, stoppedDelay: stoppedDelay}
 	recorder.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		event := r.URL.Query().Get("event")
+		uploaded, _ := strconv.ParseInt(r.URL.Query().Get("uploaded"), 10, 64)
 		recorder.mu.Lock()
 		recorder.counts[event]++
+		recorder.uploaded[event] = uploaded
+		if event == "stopped" && recorder.stoppedDelay > 0 {
+			recorder.currentStopped++
+			if recorder.currentStopped > recorder.maxStopped {
+				recorder.maxStopped = recorder.currentStopped
+			}
+			recorder.mu.Unlock()
+			time.Sleep(recorder.stoppedDelay)
+			recorder.mu.Lock()
+			recorder.currentStopped--
+		}
 		recorder.mu.Unlock()
 		_, _ = io.WriteString(w, response)
 	}))
@@ -318,6 +505,18 @@ func (r *trackerEventRecorder) Count(event string) int {
 	return r.counts[event]
 }
 
+func (r *trackerEventRecorder) LastUploaded(event string) int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.uploaded[event]
+}
+
+func (r *trackerEventRecorder) MaxStoppedConcurrent() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.maxStopped
+}
+
 func writeTestTorrent(t *testing.T, path, announce, name string, size int64) {
 	t.Helper()
 	info := fmt.Sprintf("d6:lengthi%de4:name%d:%s12:piece lengthi16384e6:pieces20:abcdefghijklmnopqrste", size, len(name), name)
@@ -325,6 +524,17 @@ func writeTestTorrent(t *testing.T, path, announce, name string, size int64) {
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func activeAnnouncer(t *testing.T, s *Scheduler) *announcer {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, a := range s.active {
+		return a
+	}
+	t.Fatal("no active torrent")
+	return nil
 }
 
 func activeHash(t *testing.T, s *Scheduler) [20]byte {

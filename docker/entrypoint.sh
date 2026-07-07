@@ -5,7 +5,7 @@ DATA_DIR="${OPENPT_DATA_DIR:-/data}"
 APP_DIR="${OPENPT_APP_DIR:-/app}"
 
 # 创建必要的目录结构（不覆盖已有内容）
-mkdir -p "${DATA_DIR}/torrents" "${DATA_DIR}/clients"
+mkdir -p "${DATA_DIR}/torrents" "${DATA_DIR}/clients" "${DATA_DIR}/torrents_archive"
 
 # 仅复制默认 config.toml（如果不存在）
 if [ ! -f "${DATA_DIR}/config.toml" ]; then
@@ -34,6 +34,7 @@ if [ "$(id -u)" = "0" ]; then
   chown openpt:openpt "${DATA_DIR}"
   chown -R openpt:openpt "${DATA_DIR}/clients"
   chown openpt:openpt "${DATA_DIR}/torrents" 2>/dev/null || true
+  chown openpt:openpt "${DATA_DIR}/torrents_archive" 2>/dev/null || true
   chown openpt:openpt "${DATA_DIR}/config.toml" 2>/dev/null || true
   exec su-exec openpt "$@"
 fi

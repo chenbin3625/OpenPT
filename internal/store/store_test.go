@@ -146,6 +146,7 @@ func TestFailedTorrentArchived(t *testing.T) {
 	if err := os.WriteFile(path, []byte("not bencode"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	ageFile(t, path)
 	if err := s.scanAndNotify(); err != nil {
 		t.Fatal(err)
 	}
@@ -186,6 +187,7 @@ func TestInvalidReplacementArchivedAndOldRemoved(t *testing.T) {
 	if err := os.WriteFile(path, []byte("not bencode"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	ageFile(t, path)
 	if err := s.scanAndNotify(); err != nil {
 		t.Fatal(err)
 	}
@@ -222,6 +224,7 @@ func TestArchiveNameCollisionDoesNotOverwrite(t *testing.T) {
 	if err := os.WriteFile(path, []byte("not bencode"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	ageFile(t, path)
 	if err := s.scanAndNotify(); err != nil {
 		t.Fatal(err)
 	}
@@ -253,6 +256,61 @@ func TestPeriodicScanUsesConfiguredInterval(t *testing.T) {
 	ev := receiveEventBefore(t, s, 250*time.Millisecond)
 	if ev.Type != Added || ev.Torrent.Name != "periodic.bin" {
 		t.Fatalf("event after periodic scan = %+v, want Added periodic.bin", ev)
+	}
+}
+
+func TestLoadFileQuietRetriesBeforeArchiving(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	archiveDir := filepath.Join(dir, "archive")
+	s := NewWithScanInterval(ctx, dir, archiveDir, 0, discardLogger())
+
+	path := filepath.Join(dir, "retry.torrent")
+	if err := os.WriteFile(path, []byte("not complete yet"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		s.loadFileQuiet(path)
+		close(done)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	writeTestTorrent(t, path, "http://tracker.example/announce", "retry.bin", 100)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("loadFileQuiet did not return")
+	}
+	if got := s.Status(); len(got) != 1 || got[0].Name != "retry.bin" {
+		t.Fatalf("store status after retry = %+v, want retry.bin", got)
+	}
+	if entries, err := os.ReadDir(archiveDir); err == nil && len(entries) != 0 {
+		t.Fatalf("archive entries = %+v, want empty", entries)
+	}
+}
+
+func TestScheduleLoadDebouncesSamePath(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	s := NewWithScanInterval(ctx, dir, "", 0, discardLogger())
+
+	path := filepath.Join(dir, "debounce.torrent")
+	writeTestTorrent(t, path, "http://tracker.example/announce", "old.bin", 100)
+	s.scheduleLoad(ctx, path)
+	writeTestTorrent(t, path, "http://tracker.example/announce", "new.bin", 200)
+	s.scheduleLoad(ctx, path)
+
+	ev := receiveEvent(t, s)
+	if ev.Type != Added || ev.Torrent.Name != "new.bin" {
+		t.Fatalf("debounced event = %+v, want Added new.bin", ev)
+	}
+	select {
+	case ev := <-s.Events():
+		t.Fatalf("unexpected extra event after debounce = %+v", ev)
+	case <-time.After(watcherSettleDelay + 100*time.Millisecond):
 	}
 }
 
@@ -296,6 +354,36 @@ func TestMoveFileRollsBackOnRemoveFailure(t *testing.T) {
 	}
 }
 
+func TestRecentInvalidTorrentIsNotArchived(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	archiveDir := filepath.Join(dir, "archive")
+	s := NewWithScanInterval(ctx, dir, archiveDir, 0, discardLogger())
+
+	path := filepath.Join(dir, "partial.torrent")
+	if err := os.WriteFile(path, []byte("not bencode yet"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("recent invalid torrent should stay in place, got err=%v", err)
+	}
+	entries, err := os.ReadDir(archiveDir)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("archive entries = %+v, want empty", entries)
+	}
+}
+
 func receiveEvent(t *testing.T, s *Store) Event {
 	t.Helper()
 	return receiveEventBefore(t, s, time.Second)
@@ -317,6 +405,14 @@ func writeTestTorrent(t *testing.T, path, announce, name string, size int64) {
 	info := fmt.Sprintf("d6:lengthi%de4:name%d:%s12:piece lengthi16384e6:pieces20:abcdefghijklmnopqrste", size, len(name), name)
 	raw := fmt.Sprintf("d8:announce%d:%s4:info%se", len(announce), announce, info)
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func ageFile(t *testing.T, path string) {
+	t.Helper()
+	old := time.Now().Add(-(archiveGracePeriod + time.Second))
+	if err := os.Chtimes(path, old, old); err != nil {
 		t.Fatal(err)
 	}
 }

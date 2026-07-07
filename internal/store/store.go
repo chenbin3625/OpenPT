@@ -26,6 +26,11 @@ const loadRetryDelay = 500 * time.Millisecond
 // 让 Docker bind-mount 等场景下仍在写入的文件落盘，避免 partial read。
 const watcherSettleDelay = 300 * time.Millisecond
 
+// archiveGracePeriod 是解析失败后归档前要求文件保持未修改的最短时间。
+// 直接向 torrents_dir 慢速写入时，fsnotify 可能在文件完整落盘前触发；
+// 对近期仍在变化的文件先保留并等待后续扫描，避免误归档有效种子。
+const archiveGracePeriod = 2 * time.Second
+
 // eventBufferSize 是 store 事件 channel 的缓冲容量。
 // 调度器持续消费事件，缓冲主要吸收扫描/批量删除时的瞬时尖峰。
 const eventBufferSize = 256
@@ -51,6 +56,9 @@ type Store struct {
 	mu           sync.RWMutex
 	byPath       map[string]*torrent.Torrent
 	events       chan Event
+	debounceMu   sync.Mutex
+	pendingLoads map[string]uint64
+	nextLoadID   uint64
 }
 
 func New(ctx context.Context, torrentsDir, archiveDir string, log *slog.Logger) *Store {
@@ -66,6 +74,7 @@ func NewWithScanInterval(ctx context.Context, torrentsDir, archiveDir string, sc
 		log:          log,
 		byPath:       map[string]*torrent.Torrent{},
 		events:       make(chan Event, eventBufferSize), // 增加缓冲区避免阻塞
+		pendingLoads: map[string]uint64{},
 	}
 }
 
@@ -131,10 +140,10 @@ func (s *Store) Start(ctx context.Context) error {
 				return
 			case ev := <-w.Events:
 				if torrent.IsTorrentPath(ev.Name) && (ev.Has(fsnotify.Create) || ev.Has(fsnotify.Write)) {
-					time.Sleep(watcherSettleDelay)
-					s.loadFile(ev.Name)
+					s.scheduleLoad(ctx, ev.Name)
 				}
 				if torrent.IsTorrentPath(ev.Name) && (ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename)) {
+					s.cancelPendingLoad(ev.Name)
 					s.removeFile(ev.Name)
 				}
 			case err := <-w.Errors:
@@ -210,7 +219,7 @@ func (s *Store) periodicScan(ctx context.Context) {
 }
 
 func (s *Store) loadFileQuiet(path string) {
-	t, err := torrent.Load(path)
+	t, err := loadTorrentWithRetry(path)
 	if err != nil {
 		s.handleLoadFailure(path, err)
 		return
@@ -222,13 +231,7 @@ func (s *Store) loadFileQuiet(path string) {
 }
 
 func (s *Store) loadFile(path string) {
-	t, err := torrent.Load(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		// Docker bind-mount 下文件可能仍在写入，短暂等待后重试一次，
-		// 避免把 partial write 的种子误判为损坏而归档。
-		time.Sleep(loadRetryDelay)
-		t, err = torrent.Load(path)
-	}
+	t, err := loadTorrentWithRetry(path)
 	if err != nil {
 		s.handleLoadFailure(path, err)
 		return
@@ -246,6 +249,49 @@ func (s *Store) loadFile(path string) {
 	}
 	s.log.Info("torrent loaded", "path", path, "name", t.Name, "size", t.Size, "info_hash", t.InfoHashHex())
 	s.emit(Event{Type: Added, Torrent: t}, path)
+}
+
+func loadTorrentWithRetry(path string) (*torrent.Torrent, error) {
+	t, err := torrent.Load(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		// Docker bind-mount 下文件可能仍在写入，短暂等待后重试一次，
+		// 避免把 partial write 的种子误判为损坏而归档。
+		time.Sleep(loadRetryDelay)
+		t, err = torrent.Load(path)
+	}
+	return t, err
+}
+
+func (s *Store) scheduleLoad(ctx context.Context, path string) {
+	s.debounceMu.Lock()
+	s.nextLoadID++
+	id := s.nextLoadID
+	s.pendingLoads[path] = id
+	s.debounceMu.Unlock()
+
+	go func() {
+		timer := time.NewTimer(watcherSettleDelay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+		s.debounceMu.Lock()
+		if s.pendingLoads[path] != id {
+			s.debounceMu.Unlock()
+			return
+		}
+		delete(s.pendingLoads, path)
+		s.debounceMu.Unlock()
+		s.loadFile(path)
+	}()
+}
+
+func (s *Store) cancelPendingLoad(path string) {
+	s.debounceMu.Lock()
+	defer s.debounceMu.Unlock()
+	delete(s.pendingLoads, path)
 }
 
 // handleLoadFailure 处理种子加载失败：不删除文件。
@@ -266,6 +312,10 @@ func (s *Store) handleLoadFailure(path string, loadErr error) {
 		s.log.Warn("torrent load failed, skipping", "path", path, "reason", loadErr)
 		return
 	}
+	if s.isRecentlyModified(path) {
+		s.log.Warn("torrent load failed, waiting for file to settle", "path", path, "reason", loadErr)
+		return
+	}
 	dest, ok := s.archiveFile(path)
 	if !ok {
 		s.log.Warn("torrent load failed, kept in place (archive failed)", "path", path, "reason", loadErr)
@@ -279,6 +329,14 @@ func (s *Store) handleLoadFailure(path string, loadErr error) {
 	}
 }
 
+func (s *Store) isRecentlyModified(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return time.Since(info.ModTime()) < archiveGracePeriod
+}
+
 // archiveFile 将加载失败的种子移动到归档目录，返回归档后的路径。
 // 同名文件已存在时自动追加数字后缀避免覆盖。
 func (s *Store) archiveFile(path string) (string, bool) {
@@ -286,12 +344,17 @@ func (s *Store) archiveFile(path string) (string, bool) {
 		s.log.Warn("failed to create archive dir", "dir", s.archiveDir, "error", err)
 		return "", false
 	}
-	dest := uniquePath(s.archiveDir, filepath.Base(path))
-	if err := moveFile(path, dest); err != nil {
-		s.log.Warn("failed to archive torrent", "path", path, "archive", dest, "error", err)
-		return "", false
+	for {
+		dest := uniquePath(s.archiveDir, filepath.Base(path))
+		if err := moveFile(path, dest); err != nil {
+			if os.IsExist(err) {
+				continue
+			}
+			s.log.Warn("failed to archive torrent", "path", path, "archive", dest, "error", err)
+			return "", false
+		}
+		return dest, true
 	}
-	return dest, true
 }
 
 func uniquePath(dir, name string) string {
@@ -309,13 +372,16 @@ func uniquePath(dir, name string) string {
 	}
 }
 
-// moveFile 跨文件系统安全地移动文件：先尝试 rename，失败（如跨设备）则回退到 copy+remove。
+// moveFile 跨文件系统安全地移动文件，不覆盖已有目标。
 func moveFile(src, dst string) error {
-	if err := os.Rename(src, dst); err == nil {
+	if err := os.Link(src, dst); err == nil {
+		if err := os.Remove(src); err != nil {
+			_ = os.Remove(dst)
+			return err
+		}
 		return nil
 	} else if copyErr := copyFile(src, dst); copyErr != nil {
-		// 回退也失败时返回 rename 的原始错误
-		return err
+		return copyErr
 	}
 	if err := os.Remove(src); err != nil {
 		// copy 已成功但 src 删除失败：回滚 dst，避免 src 与 dst 同时存在导致下次扫描重复归档
@@ -331,7 +397,7 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
-	out, err := os.Create(dst)
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
 	}
@@ -367,15 +433,7 @@ func (s *Store) emit(ev Event, path string) {
 	select {
 	case s.events <- ev:
 	default:
-		// channel 满，在 goroutine 中异步发送，并监听 context 避免泄漏
-		go func() {
-			select {
-			case s.events <- ev:
-			case <-s.ctx.Done():
-				s.log.Debug("context cancelled, dropping torrent event", "path", path)
-				return
-			}
-		}()
+		s.log.Warn("torrent event queue full, dropping event", "path", path, "type", ev.Type)
 	}
 }
 

@@ -21,6 +21,9 @@ clients_dir = "/data/clients"
 # 加载失败的种子归档目录（不会被删除，便于整理问题种子）
 archive_dir = "/data/torrents_archive"
 
+# 持久化 uploaded 和已达到分享率目标的种子
+state_file = "/data/openpt_state.json"
+
 
 # ========== 其他配置 ==========
 

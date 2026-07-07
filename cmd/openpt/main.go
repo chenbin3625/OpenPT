@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -49,7 +50,7 @@ func main() {
 	}
 	defer closeLog()
 	log.Info("config loaded", "path", *configPath, "torrents_dir", cfg.TorrentsDir, "clients_dir", cfg.ClientsDir, "client", cfg.Client)
-	log.Info("some config changes require restart", "restart_required", "client file, torrents_dir, clients_dir, logging.file, metrics.listen, metrics.path")
+	log.Info("some config changes require restart", "restart_required", "client file, torrents_dir, clients_dir, archive_dir, state_file, scan_interval_seconds, logging.file, metrics.enabled, metrics.listen, metrics.path, metrics.webui")
 
 	emu, err := clientemu.LoadClient(filepath.Join(cfg.ClientsDir, cfg.Client))
 	if err != nil {
@@ -77,9 +78,19 @@ func main() {
 
 	s := scheduler.New(cfg, emu, trackerClient, bw, st, log)
 	s.Start(ctx)
-	metricsServer := startMetricsServer(cfg, bw, s, st, log)
+	metricsServer, err := startMetricsServer(cfg, bw, s, st, log)
+	if err != nil {
+		log.Error("failed to start metrics server", "listen", cfg.Metrics.Listen, "error", err)
+		os.Exit(1)
+	}
 	if metricsServer != nil {
-		defer metricsServer.Shutdown(context.Background())
+		defer func() {
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.ShutdownStopTimeout())
+			defer shutdownCancel()
+			if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+				log.Warn("metrics server shutdown timed out or failed", "error", err)
+			}
+		}()
 	}
 
 	sig := make(chan os.Signal, 2)
@@ -102,7 +113,7 @@ func main() {
 		s.UpdateConfig(nextCfg)
 		s.Reconcile(ctx)
 		cfg = nextCfg
-		log.Info("config reloaded", "path", *configPath, "hot_reloaded", "tracker, bandwidth, scheduler, simultaneous_seed, ratio target", "restart_required", "client file, torrents_dir, clients_dir, logging.file, metrics.listen, metrics.path")
+		log.Info("config reloaded", "path", *configPath, "hot_reloaded", "announce, tracker, bandwidth, scheduler, simultaneous_seed, ratio target", "restart_required", "client file, torrents_dir, clients_dir, archive_dir, state_file, scan_interval_seconds, logging.file, metrics.enabled, metrics.listen, metrics.path, metrics.webui")
 	}
 	log.Info("shutdown requested; sending stopped announces")
 	cancel()
@@ -147,15 +158,27 @@ func trackerOptions(cfg config.Config) tracker.Options {
 	}
 }
 
-func startMetricsServer(cfg config.Config, bw *bandwidth.Dispatcher, s *scheduler.Scheduler, st *store.Store, log *slog.Logger) *http.Server {
+func startMetricsServer(cfg config.Config, bw *bandwidth.Dispatcher, s *scheduler.Scheduler, st *store.Store, log *slog.Logger) (*http.Server, error) {
 	if !cfg.Metrics.Enabled {
-		return nil
+		return nil, nil
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(cfg.Metrics.Path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		fmt.Fprintln(w, "# HELP openpt_bandwidth_current_rate_bps Current configured synthetic upload bandwidth in bytes per second.")
+		fmt.Fprintln(w, "# TYPE openpt_bandwidth_current_rate_bps gauge")
 		fmt.Fprintf(w, "openpt_bandwidth_current_rate_bps %d\n", bw.CurrentRate())
+		fmt.Fprintln(w, "# HELP openpt_active_torrents Number of currently active torrents.")
+		fmt.Fprintln(w, "# TYPE openpt_active_torrents gauge")
 		fmt.Fprintf(w, "openpt_active_torrents %d\n", s.ActiveCount())
+		fmt.Fprintln(w, "# HELP openpt_torrent_uploaded_bytes Total synthetic uploaded bytes reported per torrent.")
+		fmt.Fprintln(w, "# TYPE openpt_torrent_uploaded_bytes counter")
+		fmt.Fprintln(w, "# HELP openpt_torrent_speed_bps Current synthetic upload speed in bytes per second per torrent.")
+		fmt.Fprintln(w, "# TYPE openpt_torrent_speed_bps gauge")
+		fmt.Fprintln(w, "# HELP openpt_torrent_seeders Last tracker seeder count per torrent.")
+		fmt.Fprintln(w, "# TYPE openpt_torrent_seeders gauge")
+		fmt.Fprintln(w, "# HELP openpt_torrent_leechers Last tracker leecher count per torrent.")
+		fmt.Fprintln(w, "# TYPE openpt_torrent_leechers gauge")
 		for infoHash, st := range bw.Snapshot() {
 			fmt.Fprintf(w, "openpt_torrent_uploaded_bytes{info_hash=%q} %d\n", infoHash, st.Uploaded)
 			fmt.Fprintf(w, "openpt_torrent_speed_bps{info_hash=%q} %d\n", infoHash, st.CurrentSpeedBps)
@@ -170,12 +193,16 @@ func startMetricsServer(cfg config.Config, bw *bandwidth.Dispatcher, s *schedule
 		log.Info("web UI enabled", "url", "http://"+cfg.Metrics.Listen+"/")
 	}
 
-	server := &http.Server{Addr: cfg.Metrics.Listen, Handler: mux}
+	ln, err := net.Listen("tcp", cfg.Metrics.Listen)
+	if err != nil {
+		return nil, err
+	}
+	server := &http.Server{Addr: ln.Addr().String(), Handler: mux}
 	go func() {
-		log.Info("metrics server started", "listen", cfg.Metrics.Listen, "path", cfg.Metrics.Path)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Info("metrics server started", "listen", server.Addr, "path", cfg.Metrics.Path)
+		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Warn("metrics server stopped with error", "error", err)
 		}
 	}()
-	return server
+	return server, nil
 }

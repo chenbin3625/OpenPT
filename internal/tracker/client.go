@@ -1,6 +1,7 @@
 package tracker
 
 import (
+	"bufio"
 	"compress/flate"
 	"compress/gzip"
 	"compress/zlib"
@@ -84,11 +85,10 @@ func newHTTPClient(opts Options) (*http.Client, func(), error) {
 }
 
 func (c *Client) Announce(ctx context.Context, baseURL, query string, headers []clientemu.Header) (Response, error) {
-	sep := "?"
-	if strings.Contains(baseURL, "?") {
-		sep = "&"
+	full, err := appendRawQuery(baseURL, query)
+	if err != nil {
+		return Response{}, err
 	}
-	full := baseURL + sep + query
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, full, nil)
 	if err != nil {
 		return Response{}, err
@@ -137,6 +137,22 @@ func (c *Client) Announce(ctx context.Context, baseURL, query string, headers []
 	return parsed, nil
 }
 
+func appendRawQuery(baseURL, query string) (string, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", err
+	}
+	if query == "" {
+		return u.String(), nil
+	}
+	if u.RawQuery == "" {
+		u.RawQuery = query
+	} else {
+		u.RawQuery += "&" + query
+	}
+	return u.String(), nil
+}
+
 func decodedBody(resp *http.Response) (io.ReadCloser, error) {
 	switch strings.ToLower(resp.Header.Get("Content-Encoding")) {
 	case "gzip":
@@ -146,14 +162,27 @@ func decodedBody(resp *http.Response) (io.ReadCloser, error) {
 		}
 		return closeBoth{ReadCloser: gr, other: resp.Body}, nil
 	case "deflate":
-		zr, err := zlib.NewReader(resp.Body)
-		if err == nil {
+		br := bufio.NewReader(resp.Body)
+		if looksLikeZlib(br) {
+			zr, err := zlib.NewReader(br)
+			if err != nil {
+				return nil, err
+			}
 			return closeBoth{ReadCloser: zr, other: resp.Body}, nil
 		}
-		return closeBoth{ReadCloser: flate.NewReader(resp.Body), other: resp.Body}, nil
+		return closeBoth{ReadCloser: flate.NewReader(br), other: resp.Body}, nil
 	default:
 		return resp.Body, nil
 	}
+}
+
+func looksLikeZlib(br *bufio.Reader) bool {
+	header, err := br.Peek(2)
+	if err != nil {
+		return false
+	}
+	cmf, flg := int(header[0]), int(header[1])
+	return cmf&0x0f == 8 && ((cmf<<8)+flg)%31 == 0
 }
 
 type closeBoth struct {

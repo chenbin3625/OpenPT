@@ -54,6 +54,45 @@ ratio_target = -2
 	}
 }
 
+func TestUnknownFieldFails(t *testing.T) {
+	path := writeConfigTOML(t, `
+client = "qbittorrent.client"
+
+[uploaded]
+strategy = "configured_rate"
+configured_rate_bpss = 170000
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected unknown TOML field to fail")
+	}
+}
+
+func TestConfiguredRateMustBePositive(t *testing.T) {
+	path := writeConfigTOML(t, `
+client = "qbittorrent.client"
+
+[uploaded]
+strategy = "configured_rate"
+configured_rate_bps = 0
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected configured_rate with zero rate to fail")
+	}
+}
+
+func TestConservativeRateMustBePositiveWhenSelected(t *testing.T) {
+	path := writeConfigTOML(t, `
+client = "qbittorrent.client"
+
+[uploaded]
+strategy = "conservative_rate"
+conservative_rate_bps = -1
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected conservative_rate with negative rate to fail")
+	}
+}
+
 func TestInvalidScanIntervalFails(t *testing.T) {
 	path := writeConfigTOML(t, `
 client = "qbittorrent.client"
@@ -87,6 +126,18 @@ archive_dir = "`+archiveDir+`"
 	}
 }
 
+func TestInvalidProxyFails(t *testing.T) {
+	path := writeConfigTOML(t, `
+client = "qbittorrent.client"
+
+[tracker]
+proxy = "ftp://127.0.0.1:7890"
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected unsupported tracker.proxy scheme to fail")
+	}
+}
+
 func TestInvalidMetricsPathFailsWhenMetricsEnabled(t *testing.T) {
 	path := writeConfigTOML(t, `
 client = "qbittorrent.client"
@@ -97,6 +148,19 @@ path = "metrics"
 `)
 	if _, err := Load(path); err == nil {
 		t.Fatal("expected metrics.path without leading slash to fail")
+	}
+}
+
+func TestInvalidMetricsListenFailsWhenMetricsEnabled(t *testing.T) {
+	path := writeConfigTOML(t, `
+client = "qbittorrent.client"
+
+[metrics]
+enabled = true
+listen = "not-a-listen-address"
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected invalid metrics.listen to fail")
 	}
 }
 
@@ -128,6 +192,39 @@ func TestDefaultValues(t *testing.T) {
 	}
 	if cfg.Uploaded.Strategy != "none" {
 		t.Fatalf("default uploaded.strategy = %q, want none", cfg.Uploaded.Strategy)
+	}
+}
+
+func TestRelativePathsResolveFromConfigDir(t *testing.T) {
+	path := writeConfigTOML(t, `
+client = "qbittorrent.client"
+torrents_dir = "./torrents"
+archive_dir = "../archive"
+clients_dir = "./clients"
+state_file = "./state.json"
+
+[logging]
+file = "./openpt.log"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Dir(path)
+	if cfg.TorrentsDir != filepath.Join(root, "torrents") {
+		t.Fatalf("torrents_dir = %q, want config-relative path", cfg.TorrentsDir)
+	}
+	if cfg.ArchiveDir != filepath.Clean(filepath.Join(root, "../archive")) {
+		t.Fatalf("archive_dir = %q, want config-relative path", cfg.ArchiveDir)
+	}
+	if cfg.ClientsDir != filepath.Join(root, "clients") {
+		t.Fatalf("clients_dir = %q, want config-relative path", cfg.ClientsDir)
+	}
+	if cfg.StateFile != filepath.Join(root, "state.json") {
+		t.Fatalf("state_file = %q, want config-relative path", cfg.StateFile)
+	}
+	if cfg.Logging.File != filepath.Join(root, "openpt.log") {
+		t.Fatalf("logging.file = %q, want config-relative path", cfg.Logging.File)
 	}
 }
 
