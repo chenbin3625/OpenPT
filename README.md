@@ -68,9 +68,21 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:9090:9090"
+    environment:
+      PUID: "1000"
+      PGID: "1000"
     volumes:
       - ./data:/data
 ```
+
+如果宿主机当前用户不是 `1000:1000`，先查看实际 UID/GID：
+
+```sh
+id -u
+id -g
+```
+
+再把 `PUID`、`PGID` 改成对应数值。OpenPT 会以这个用户运行，便于读取 bind mount 进来的 `.torrent` 文件。
 
 启动：
 
@@ -82,6 +94,13 @@ docker compose up -d
 
 ```text
 ./data/torrents
+```
+
+如果已有文件出现 `permission denied`，确认目录和种子文件对 `PUID/PGID` 对应的用户可读写：
+
+```sh
+sudo chown -R "$(id -u):$(id -g)" ./data
+chmod -R u+rwX ./data
 ```
 
 修改配置后重启容器：

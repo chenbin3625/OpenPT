@@ -6,18 +6,24 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 )
 
 const (
-	openptUID = 10001
-	openptGID = 10001
+	defaultOpenPTUID = 10001
+	defaultOpenPTGID = 10001
 )
 
 func main() {
 	dataDir := getenv("OPENPT_DATA_DIR", "/data")
 	appDir := getenv("OPENPT_APP_DIR", "/app")
+	runUID, runGID, err := runtimeIDs()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "openpt-entrypoint: %v\n", err)
+		os.Exit(1)
+	}
 	if err := initDataDir(dataDir, appDir); err != nil {
 		fmt.Fprintf(os.Stderr, "openpt-entrypoint: %v\n", err)
 		os.Exit(1)
@@ -30,12 +36,12 @@ func main() {
 		args = append([]string{"openpt"}, args...)
 	}
 	if os.Geteuid() == 0 {
-		fixPermissions(dataDir)
-		if err := syscall.Setgid(openptGID); err != nil {
+		fixPermissions(dataDir, runUID, runGID)
+		if err := syscall.Setgid(runGID); err != nil {
 			fmt.Fprintf(os.Stderr, "openpt-entrypoint: setgid: %v\n", err)
 			os.Exit(1)
 		}
-		if err := syscall.Setuid(openptUID); err != nil {
+		if err := syscall.Setuid(runUID); err != nil {
 			fmt.Fprintf(os.Stderr, "openpt-entrypoint: setuid: %v\n", err)
 			os.Exit(1)
 		}
@@ -51,6 +57,33 @@ func getenv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func runtimeIDs() (int, int, error) {
+	uid, err := getenvInt([]string{"OPENPT_UID", "PUID"}, defaultOpenPTUID)
+	if err != nil {
+		return 0, 0, err
+	}
+	gid, err := getenvInt([]string{"OPENPT_GID", "PGID"}, defaultOpenPTGID)
+	if err != nil {
+		return 0, 0, err
+	}
+	return uid, gid, nil
+}
+
+func getenvInt(keys []string, fallback int) (int, error) {
+	for _, key := range keys {
+		value := os.Getenv(key)
+		if value == "" {
+			continue
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("%s must be a non-negative integer", key)
+		}
+		return n, nil
+	}
+	return fallback, nil
 }
 
 func initDataDir(dataDir, appDir string) error {
@@ -108,11 +141,11 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-func fixPermissions(dataDir string) {
-	_ = os.Chown(dataDir, openptUID, openptGID)
+func fixPermissions(dataDir string, uid, gid int) {
+	_ = os.Chown(dataDir, uid, gid)
 	_ = filepath.WalkDir(filepath.Join(dataDir, "clients"), func(path string, _ os.DirEntry, err error) error {
 		if err == nil {
-			_ = os.Chown(path, openptUID, openptGID)
+			_ = os.Chown(path, uid, gid)
 		}
 		return nil
 	})
@@ -122,7 +155,7 @@ func fixPermissions(dataDir string) {
 		filepath.Join(dataDir, "config.toml"),
 		filepath.Join(dataDir, "openpt_state.json"),
 	} {
-		_ = os.Chown(path, openptUID, openptGID)
+		_ = os.Chown(path, uid, gid)
 	}
 }
 
