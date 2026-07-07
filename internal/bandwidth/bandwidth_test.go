@@ -59,6 +59,36 @@ func TestDispatcherRandomRateDoesNotRequireBaseRate(t *testing.T) {
 	}
 }
 
+func TestStrategyNoneIgnoresResidualRatesAndJitter(t *testing.T) {
+	d := New(Config{
+		Strategy:            "none",
+		ConfiguredRateBps:   1000,
+		MinRateBps:          700,
+		MaxRateBps:          900,
+		RandomJitterPercent: 10,
+	})
+	d.Register("hash")
+	forceElapsed(d, time.Second)
+	d.tick()
+
+	if got := d.CurrentRate(); got != 0 {
+		t.Fatalf("current rate = %d, want 0 for strategy none", got)
+	}
+	st := d.Get("hash")
+	if st.CurrentSpeedBps != 0 || st.Uploaded != 0 {
+		t.Fatalf("stats with strategy none = %+v, want no uploaded/speed", st)
+	}
+
+	d.UpdateConfig(Config{
+		Strategy:            "none",
+		ConfiguredRateBps:   2000,
+		RandomJitterPercent: 50,
+	})
+	if got := d.CurrentRate(); got != 0 {
+		t.Fatalf("current rate after update = %d, want 0 for strategy none", got)
+	}
+}
+
 func TestPeersWeightWithZeroPeers(t *testing.T) {
 	// 验证 seeders=0, leechers=0 时返回默认权重而非 0
 	weight := peersWeight(0, 0)

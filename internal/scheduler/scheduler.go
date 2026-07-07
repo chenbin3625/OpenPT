@@ -3,8 +3,11 @@ package scheduler
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -30,6 +33,8 @@ const (
 // maxConcurrentStopped 限制并发 stopped announce 的数量，避免批量删除种子时
 // 瞬间打出大量 stopped 请求淹没 tracker。
 const maxConcurrentStopped = 8
+
+const statePersistInterval = 5 * time.Second
 
 type Result struct {
 	NextEvent clientemu.Event
@@ -83,10 +88,22 @@ type Scheduler struct {
 	mu        sync.Mutex
 	active    map[[20]byte]*announcer
 	completed map[[20]byte]bool // 已完成的种子，不再重新添加
+	persisted map[[20]byte]persistedTorrentState
+	stateMu   sync.Mutex
+	stateFile string
 
 	// stoppedSem 限制并发 stopped announce 数量；stoppedWG 用于停机时等待在途的异步 stopped announce
 	stoppedSem chan struct{}
 	stoppedWG  sync.WaitGroup
+}
+
+type persistedTorrentState struct {
+	Uploaded  int64 `json:"uploaded"`
+	Completed bool  `json:"completed,omitempty"`
+}
+
+type persistedStateFile struct {
+	Torrents map[string]persistedTorrentState `json:"torrents"`
 }
 
 type announcer struct {
@@ -117,16 +134,22 @@ func (a *announcer) markStarted() {
 }
 
 func New(cfg config.Config, emu *clientemu.Client, tc *tracker.Client, bw *bandwidth.Dispatcher, st *store.Store, log *slog.Logger) *Scheduler {
+	persisted, completed := loadPersistedState(cfg.StateFile, log)
 	return &Scheduler{
 		cfg: cfg, client: emu, tracker: tc, bw: bw, store: st, log: log,
 		active:     map[[20]byte]*announcer{},
-		completed:  map[[20]byte]bool{},
+		completed:  completed,
+		persisted:  persisted,
+		stateFile:  cfg.StateFile,
 		stoppedSem: make(chan struct{}, maxConcurrentStopped),
 	}
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
 	s.fillSlots(ctx)
+	if s.stateFile != "" {
+		go s.persistStateLoop(ctx)
+	}
 	go func() {
 		for {
 			select {
@@ -146,30 +169,26 @@ func (s *Scheduler) Start(ctx context.Context) {
 }
 
 func (s *Scheduler) Stop(ctx context.Context) {
+	type stoppedAnnounce struct {
+		a     *announcer
+		stats bandwidth.Stats
+	}
 	s.mu.Lock()
-	list := make([]*announcer, 0, len(s.active))
+	list := make([]stoppedAnnounce, 0, len(s.active))
 	for _, a := range s.active {
 		if a.cancel != nil {
 			a.cancel()
 		}
 		if a.isStarted() {
-			list = append(list, a)
+			list = append(list, stoppedAnnounce{
+				a:     a,
+				stats: s.bw.Get(a.torrent.InfoHashHex()),
+			})
 		}
 	}
 	s.mu.Unlock()
-	var wg sync.WaitGroup
-	for _, a := range list {
-		wg.Add(1)
-		go func(a *announcer) {
-			defer wg.Done()
-			s.announce(ctx, a, clientemu.EventStopped)
-		}(a)
-	}
-	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
-	select {
-	case <-ctx.Done():
-	case <-done:
+	for _, item := range list {
+		s.sendStoppedAsync(ctx, item.a, item.stats)
 	}
 	// 等待因种子移除而触发的在途异步 stopped announce，避免停机时漏发
 	stoppedDone := make(chan struct{})
@@ -178,6 +197,7 @@ func (s *Scheduler) Stop(ctx context.Context) {
 	case <-ctx.Done():
 	case <-stoppedDone:
 	}
+	s.persistState()
 }
 
 func (s *Scheduler) UpdateConfig(cfg config.Config) {
@@ -268,6 +288,9 @@ func (s *Scheduler) tryAdd(parent context.Context, t *torrent.Torrent) bool {
 	}
 	ctx, cancel := context.WithCancel(parent)
 	now := time.Now()
+	if persisted, ok := s.persisted[t.InfoHash]; ok && persisted.Uploaded > 0 {
+		s.bw.Restore(t.InfoHashHex(), bandwidth.Stats{Uploaded: persisted.Uploaded})
+	}
 	a := &announcer{
 		torrent:      t,
 		lastInterval: 5 * time.Second,
@@ -284,9 +307,13 @@ func (s *Scheduler) tryAdd(parent context.Context, t *torrent.Torrent) bool {
 
 func (s *Scheduler) stopTorrent(ctx context.Context, hash [20]byte, reason stopReason) {
 	a := s.removeActive(hash)
+	var stats bandwidth.Stats
+	if a != nil {
+		stats = s.bw.Get(a.torrent.InfoHashHex())
+	}
 	if a != nil && a.isStarted() {
 		// 异步发送 stopped announce，避免阻塞事件循环（批量删除时尤其重要）
-		s.sendStoppedAsync(ctx, a)
+		s.sendStoppedAsync(ctx, a, stats)
 	}
 	if a != nil {
 		s.bw.Unregister(a.torrent.InfoHashHex())
@@ -297,15 +324,17 @@ func (s *Scheduler) stopTorrent(ctx context.Context, hash [20]byte, reason stopR
 	if reason != StopReasonRatioTarget {
 		s.clearCompleted(hash)
 	}
+	s.rememberStopped(hash, stats.Uploaded, reason)
 
 	s.fillSlots(ctx)
+	s.persistState()
 }
 
 // sendStoppedAsync 在并发受限的 goroutine 中发送 stopped announce。
 // 使用传入的 ctx（调度器根 ctx）：announcer 自身的 ctx 已被 removeActive 取消，
 // 而根 ctx 在正常运行期间存活、停机时取消以中断在途请求。单次请求时长由 tracker
 // HTTP 客户端的 Timeout 兜底，无需额外 context 超时（避免配置为 0 时立即超时）。
-func (s *Scheduler) sendStoppedAsync(ctx context.Context, a *announcer) {
+func (s *Scheduler) sendStoppedAsync(ctx context.Context, a *announcer, stats bandwidth.Stats) {
 	s.stoppedWG.Add(1)
 	go func() {
 		defer s.stoppedWG.Done()
@@ -315,7 +344,7 @@ func (s *Scheduler) sendStoppedAsync(ctx context.Context, a *announcer) {
 		case <-ctx.Done():
 			return
 		}
-		if _, err := s.announce(ctx, a, clientemu.EventStopped); err != nil {
+		if _, err := s.announceWithStats(ctx, a, clientemu.EventStopped, stats); err != nil {
 			// ctx 已取消时的失败属于停机正常路径，不记录告警
 			if ctx.Err() == nil {
 				s.log.Warn("async stopped announce failed", "name", a.torrent.Name, "error", err)
@@ -329,6 +358,25 @@ func (s *Scheduler) clearCompleted(hash [20]byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.completed, hash)
+}
+
+func (s *Scheduler) rememberStopped(hash [20]byte, uploaded int64, reason stopReason) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if reason == StopReasonRemoved {
+		delete(s.persisted, hash)
+		delete(s.completed, hash)
+		return
+	}
+	if uploaded < 0 {
+		uploaded = 0
+	}
+	st := s.persisted[hash]
+	if uploaded > st.Uploaded {
+		st.Uploaded = uploaded
+	}
+	st.Completed = false
+	s.persisted[hash] = st
 }
 
 func (s *Scheduler) removeActive(hash [20]byte) *announcer {
@@ -420,8 +468,11 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 }
 
 func (s *Scheduler) announce(ctx context.Context, a *announcer, event clientemu.Event) (tracker.Response, error) {
+	return s.announceWithStats(ctx, a, event, s.bw.Get(a.torrent.InfoHashHex()))
+}
+
+func (s *Scheduler) announceWithStats(ctx context.Context, a *announcer, event clientemu.Event, stats bandwidth.Stats) (tracker.Response, error) {
 	cfg := s.config()
-	stats := s.bw.Get(a.torrent.InfoHashHex())
 	query, err := s.client.RenderQuery(clientemu.RenderInput{
 		InfoHash:   a.torrent.InfoHashBytes(),
 		InfoHashID: a.torrent.InfoHashHex(),
@@ -459,15 +510,19 @@ func (s *Scheduler) ActiveCount() int {
 
 func (s *Scheduler) completeTorrent(ctx context.Context, a *announcer, ratioTarget float64) {
 	s.log.Info("ratio target reached; completing torrent", "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex(), "ratio_target", ratioTarget)
+	stats := s.bw.Get(a.torrent.InfoHashHex())
+	stopCtx := a.fillContext(ctx)
 	// 标记为已完成，防止重新添加
 	s.markCompleted(a.torrent.InfoHash)
+	s.rememberCompleted(a.torrent.InfoHash, stats.Uploaded)
 	s.bw.Unregister(a.torrent.InfoHashHex())
 	s.removeActive(a.torrent.InfoHash)
 	// removeActive 后 announcer 自身 ctx 已取消，异步发送 stopped announce
 	if a.isStarted() {
-		s.sendStoppedAsync(ctx, a)
+		s.sendStoppedAsync(stopCtx, a, stats)
 	}
-	s.fillSlots(a.fillContext(ctx))
+	s.fillSlots(stopCtx)
+	s.persistState()
 }
 
 // markCompleted 标记种子为已完成状态，防止重新调度
@@ -475,6 +530,129 @@ func (s *Scheduler) markCompleted(hash [20]byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.completed[hash] = true
+}
+
+func (s *Scheduler) rememberCompleted(hash [20]byte, uploaded int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if uploaded < 0 {
+		uploaded = 0
+	}
+	st := s.persisted[hash]
+	if uploaded > st.Uploaded {
+		st.Uploaded = uploaded
+	}
+	st.Completed = true
+	s.persisted[hash] = st
+}
+
+func loadPersistedState(path string, log *slog.Logger) (map[[20]byte]persistedTorrentState, map[[20]byte]bool) {
+	persisted := map[[20]byte]persistedTorrentState{}
+	completed := map[[20]byte]bool{}
+	if path == "" {
+		return persisted, completed
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			warn(log, "failed to load state file", "path", path, "error", err)
+		}
+		return persisted, completed
+	}
+	var file persistedStateFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		warn(log, "failed to parse state file", "path", path, "error", err)
+		return persisted, completed
+	}
+	for id, st := range file.Torrents {
+		raw, err := hex.DecodeString(id)
+		if err != nil || len(raw) != 20 {
+			warn(log, "ignored invalid state entry", "path", path, "info_hash", id)
+			continue
+		}
+		var hash [20]byte
+		copy(hash[:], raw)
+		if st.Uploaded < 0 {
+			st.Uploaded = 0
+		}
+		persisted[hash] = st
+		if st.Completed {
+			completed[hash] = true
+		}
+	}
+	return persisted, completed
+}
+
+func (s *Scheduler) persistStateLoop(ctx context.Context) {
+	ticker := time.NewTicker(statePersistInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			s.persistState()
+			return
+		case <-ticker.C:
+			s.persistState()
+		}
+	}
+}
+
+func (s *Scheduler) persistState() {
+	if s.stateFile == "" {
+		return
+	}
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+
+	s.mu.Lock()
+	torrents := make(map[string]persistedTorrentState, len(s.persisted)+len(s.completed))
+	for hash, st := range s.persisted {
+		torrents[HashID(hash)] = st
+	}
+	for hash := range s.completed {
+		id := HashID(hash)
+		st := torrents[id]
+		st.Completed = true
+		torrents[id] = st
+	}
+	s.mu.Unlock()
+
+	for id, stats := range s.bw.Snapshot() {
+		st := torrents[id]
+		if stats.Uploaded > st.Uploaded {
+			st.Uploaded = stats.Uploaded
+		}
+		torrents[id] = st
+	}
+	for id, st := range torrents {
+		if st.Uploaded <= 0 && !st.Completed {
+			delete(torrents, id)
+		}
+	}
+	data, err := json.MarshalIndent(persistedStateFile{Torrents: torrents}, "", "  ")
+	if err != nil {
+		warn(s.log, "failed to encode state file", "path", s.stateFile, "error", err)
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(s.stateFile), 0o755); err != nil {
+		warn(s.log, "failed to create state dir", "path", s.stateFile, "error", err)
+		return
+	}
+	tmp := s.stateFile + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		warn(s.log, "failed to write state file", "path", s.stateFile, "error", err)
+		return
+	}
+	if err := os.Rename(tmp, s.stateFile); err != nil {
+		_ = os.Remove(tmp)
+		warn(s.log, "failed to replace state file", "path", s.stateFile, "error", err)
+	}
+}
+
+func warn(log *slog.Logger, msg string, args ...any) {
+	if log != nil {
+		log.Warn(msg, args...)
+	}
 }
 
 func (a *announcer) fillContext(fallback context.Context) context.Context {

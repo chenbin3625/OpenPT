@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"io"
 	"math/big"
 	"os"
 	"regexp"
@@ -27,6 +27,8 @@ const (
 // persistentGeneratorTTL 是 TORRENT_PERSISTENT 策略下每个种子缓存值的存活时间。
 // 超过后清理，避免长期运行后 perTorrent map 无限增长。
 const persistentGeneratorTTL = 120 * time.Minute
+
+var cryptoRandReader io.Reader = rand.Reader
 
 type Header struct {
 	Name  string `json:"name"`
@@ -97,6 +99,9 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	}
 	peer, err := NewGenerator(cfg.PeerGenerator, true)
 	if err != nil {
+		return nil, fmt.Errorf("peerIdGenerator: %w", err)
+	}
+	if err := validatePeerIDGenerator(peer); err != nil {
 		return nil, fmt.Errorf("peerIdGenerator: %w", err)
 	}
 	var key *Generator
@@ -318,6 +323,11 @@ func NewGenerator(cfg GeneratorConfig, isPeer bool) (*Generator, error) {
 	if cfg.RefreshOn == "" {
 		cfg.RefreshOn = "NEVER"
 	}
+	switch cfg.RefreshOn {
+	case "ALWAYS", "TIMED", "TIMED_OR_AFTER_STARTED_ANNOUNCE", "TORRENT_VOLATILE", "TORRENT_PERSISTENT", "NEVER":
+	default:
+		return nil, fmt.Errorf("unsupported refreshOn %q", cfg.RefreshOn)
+	}
 	g := &Generator{
 		alg:             alg,
 		refreshOn:       cfg.RefreshOn,
@@ -334,6 +344,32 @@ func NewGenerator(cfg GeneratorConfig, isPeer bool) (*Generator, error) {
 		g.globalValue = g.generate()
 	}
 	return g, nil
+}
+
+func validatePeerIDGenerator(g *Generator) error {
+	sample := g.globalValue
+	if sample == "" {
+		sample = g.generate()
+	}
+	n, ok := peerIDByteLen(sample)
+	if !ok {
+		return errors.New("generated peer_id contains characters outside byte range")
+	}
+	if n != 20 {
+		return fmt.Errorf("generated peer_id must be 20 bytes, got %d", n)
+	}
+	return nil
+}
+
+func peerIDByteLen(s string) (int, bool) {
+	n := 0
+	for _, ch := range s {
+		if ch > 0xff {
+			return 0, false
+		}
+		n++
+	}
+	return n, true
 }
 
 func (g *Generator) Get(infoHash string, event Event) string {
@@ -415,8 +451,14 @@ type Algorithm interface {
 func NewAlgorithm(cfg AlgorithmConfig) (Algorithm, error) {
 	switch cfg.Type {
 	case "HASH":
+		if cfg.Length <= 0 {
+			return nil, errors.New("length must be greater than 0 for HASH")
+		}
 		return hashAlgorithm{length: cfg.Length, noLeadingZero: false}, nil
 	case "HASH_NO_LEADING_ZERO":
+		if cfg.Length <= 0 {
+			return nil, errors.New("length must be greater than 0 for HASH_NO_LEADING_ZERO")
+		}
 		return hashAlgorithm{length: cfg.Length, noLeadingZero: true}, nil
 	case "DIGIT_RANGE_TRANSFORMED_TO_HEX_WITHOUT_LEADING_ZEROES":
 		if cfg.InclusiveUpperBound < cfg.InclusiveLowerBound {
@@ -424,7 +466,17 @@ func NewAlgorithm(cfg AlgorithmConfig) (Algorithm, error) {
 		}
 		return digitHexAlgorithm{min: cfg.InclusiveLowerBound, max: cfg.InclusiveUpperBound}, nil
 	case "RANDOM_POOL_WITH_CHECKSUM":
-		return randomPoolChecksumAlgorithm{prefix: cfg.Prefix, pool: []rune(cfg.CharactersPool), base: cfg.Base}, nil
+		if len([]rune(cfg.Prefix)) >= 20 {
+			return nil, errors.New("prefix must be shorter than 20 characters for RANDOM_POOL_WITH_CHECKSUM")
+		}
+		pool := []rune(cfg.CharactersPool)
+		if len(pool) == 0 {
+			return nil, errors.New("charactersPool is required for RANDOM_POOL_WITH_CHECKSUM")
+		}
+		if cfg.Base != len(pool) {
+			return nil, errors.New("base must equal charactersPool length for RANDOM_POOL_WITH_CHECKSUM")
+		}
+		return randomPoolChecksumAlgorithm{prefix: cfg.Prefix, pool: pool, base: cfg.Base}, nil
 	case "REGEX":
 		return newRegexAlgorithm(cfg.Pattern)
 	default:
@@ -494,11 +546,9 @@ func randInt(max int) int {
 	if max <= 0 {
 		return 0
 	}
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
+	n, err := rand.Int(cryptoRandReader, big.NewInt(int64(max)))
 	if err != nil {
-		// crypto/rand 失败极罕见；记录告警便于观测，降级返回 0 不阻断生成流程
-		log.Printf("clientemu: crypto/rand failed for randInt(%d): %v; falling back to 0", max, err)
-		return 0
+		panic(fmt.Sprintf("clientemu: crypto/rand failed for randInt(%d): %v", max, err))
 	}
 	return int(n.Int64())
 }
@@ -507,10 +557,9 @@ func randInt64(max int64) int64 {
 	if max <= 0 {
 		return 0
 	}
-	n, err := rand.Int(rand.Reader, big.NewInt(max))
+	n, err := rand.Int(cryptoRandReader, big.NewInt(max))
 	if err != nil {
-		log.Printf("clientemu: crypto/rand failed for randInt64(%d): %v; falling back to 0", max, err)
-		return 0
+		panic(fmt.Sprintf("clientemu: crypto/rand failed for randInt64(%d): %v", max, err))
 	}
 	return n.Int64()
 }

@@ -17,7 +17,7 @@ RUN GOARM="${TARGETVARIANT#v}" && \
       -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
       -o /out/openpt ./cmd/openpt
 
-FROM alpine:3.20
+FROM alpine:3.22
 
 RUN apk add --no-cache ca-certificates su-exec tzdata && \
     addgroup -S openpt && \
@@ -35,5 +35,7 @@ RUN chmod +x /usr/local/bin/openpt-entrypoint && \
     find /data/torrents -mindepth 1 -delete 2>/dev/null || true
 
 VOLUME ["/data"]
+EXPOSE 9090
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s CMD openpt --version >/dev/null || exit 1
 ENTRYPOINT ["openpt-entrypoint"]
 CMD ["--config", "/data/config.toml"]

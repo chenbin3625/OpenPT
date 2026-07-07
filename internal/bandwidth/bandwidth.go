@@ -123,6 +123,34 @@ func (d *Dispatcher) Register(infoHash string) {
 	d.recomputeSpeedsLocked()
 }
 
+func (d *Dispatcher) Restore(infoHash string, stats Stats) {
+	if stats.Uploaded < 0 {
+		stats.Uploaded = 0
+	}
+	if stats.Downloaded < 0 {
+		stats.Downloaded = 0
+	}
+	if stats.Left < 0 {
+		stats.Left = 0
+	}
+	if stats.Seeders < 0 {
+		stats.Seeders = 0
+	}
+	if stats.Leechers < 0 {
+		stats.Leechers = 0
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.stats[infoHash] = &Stats{
+		Uploaded:   stats.Uploaded,
+		Downloaded: stats.Downloaded,
+		Left:       stats.Left,
+		Seeders:    stats.Seeders,
+		Leechers:   stats.Leechers,
+	}
+	d.recomputeSpeedsLocked()
+}
+
 func (d *Dispatcher) Unregister(infoHash string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -202,10 +230,18 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.RandomRefreshSeconds == 0 {
 		cfg.RandomRefreshSeconds = 20 * 60
 	}
+	if cfg.Strategy == "none" {
+		cfg.MinRateBps = 0
+		cfg.MaxRateBps = 0
+		return cfg
+	}
 	if cfg.MinRateBps == 0 && cfg.MaxRateBps == 0 && cfg.RandomJitterPercent > 0 {
-		base := cfg.ConfiguredRateBps
-		if cfg.Strategy == "conservative_rate" {
+		base := int64(0)
+		switch cfg.Strategy {
+		case "conservative_rate":
 			base = cfg.ConservativeRateBps
+		case "configured_rate":
+			base = cfg.ConfiguredRateBps
 		}
 		if base > 0 {
 			delta := base * int64(cfg.RandomJitterPercent) / 100

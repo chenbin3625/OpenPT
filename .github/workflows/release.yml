@@ -180,6 +180,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Docker build metadata
+        if: steps.dockerhub-secrets.outputs.configured == 'true'
+        id: docker-build-meta
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Docker metadata
         if: steps.dockerhub-secrets.outputs.configured == 'true'
         id: meta
@@ -196,11 +203,11 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ github.ref_name }}
+            VERSION=${{ steps.docker-build-meta.outputs.version }}
             COMMIT=${{ github.sha }}
-            DATE=${{ github.event.head_commit.timestamp }}
+            DATE=${{ steps.docker-build-meta.outputs.date }}

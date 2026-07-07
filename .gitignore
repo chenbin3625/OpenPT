@@ -1,5 +1,6 @@
 /openpt
 /torrents/
+/torrents_archive/
 *.torrent
 config.toml
 *.log

@@ -103,6 +103,7 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 		{Key: "torrents_dir", Label: "种子目录", Value: cfg.TorrentsDir},
 		{Key: "archive_dir", Label: "归档目录", Value: cfg.ArchiveDir},
 		{Key: "clients_dir", Label: "客户端配置目录", Value: cfg.ClientsDir},
+		{Key: "state_file", Label: "状态文件", Value: cfg.StateFile},
 		{Key: "client", Label: "客户端伪装", Value: cfg.Client},
 		{Key: "simultaneous_seed", Label: "同时保种数量", Value: formatSeedLimit(cfg.SimultaneousSeed)},
 		{Key: "scan_interval_seconds", Label: "扫描间隔", Value: formatSeconds(cfg.ScanIntervalSeconds)},

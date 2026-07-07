@@ -30,6 +30,10 @@ archive_dir = "./torrents_archive"
 # 存放 BitTorrent 客户端模拟配置文件（.client 文件）
 clients_dir = "./clients"
 
+# 状态文件
+# 用于持久化 uploaded 和已达到分享率目标的种子，避免重启后重新从 0 上报
+state_file = "./openpt_state.json"
+
 
 # ========== 其他高级配置 ==========
 
