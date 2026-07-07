@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestRuntimeIDsDefaultToOpenPTUser(t *testing.T) {
+func TestRuntimeIDsDefaultToUIDAndGID1000(t *testing.T) {
 	t.Setenv("OPENPT_UID", "")
 	t.Setenv("OPENPT_GID", "")
 	t.Setenv("PUID", "")
@@ -17,8 +17,8 @@ func TestRuntimeIDsDefaultToOpenPTUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if uid != defaultOpenPTUID || gid != defaultOpenPTGID {
-		t.Fatalf("runtimeIDs = %d:%d, want %d:%d", uid, gid, defaultOpenPTUID, defaultOpenPTGID)
+	if uid != 1000 || gid != 1000 {
+		t.Fatalf("runtimeIDs = %d:%d, want 1000:1000", uid, gid)
 	}
 }
 
@@ -85,7 +85,8 @@ func TestInitDataDirCopiesDefaultsWithoutOverwritingClients(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := initDataDir(dataDir, appDir); err != nil {
+	createdPaths, err := initDataDir(dataDir, appDir)
+	if err != nil {
 		t.Fatal(err)
 	}
 	for _, dir := range []string{"torrents", "clients", "torrents_archive"} {
@@ -99,4 +100,60 @@ func TestInitDataDirCopiesDefaultsWithoutOverwritingClients(t *testing.T) {
 	if got, err := os.ReadFile(filepath.Join(dataDir, "clients", "qb.client")); err != nil || string(got) != "existing" {
 		t.Fatalf("existing client was overwritten: %q, %v", got, err)
 	}
+
+	created := pathSet(createdPaths)
+	for _, path := range []string{
+		dataDir,
+		filepath.Join(dataDir, "clients"),
+		filepath.Join(dataDir, "clients", "qb.client"),
+	} {
+		if created[path] {
+			t.Fatalf("existing path %s was reported as newly created", path)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(dataDir, "torrents"),
+		filepath.Join(dataDir, "torrents_archive"),
+		filepath.Join(dataDir, "config.toml"),
+	} {
+		if !created[path] {
+			t.Fatalf("created path %s was not reported", path)
+		}
+	}
+}
+
+func TestInitDataDirReportsCopiedClientAsCreated(t *testing.T) {
+	appDir := t.TempDir()
+	dataDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(appDir, "examples"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(appDir, "clients"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "examples", "config.docker.toml"), []byte("client = \"qb.client\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "clients", "qb.client"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	createdPaths, err := initDataDir(dataDir, appDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created := pathSet(createdPaths)
+	clientPath := filepath.Join(dataDir, "clients", "qb.client")
+	if !created[clientPath] {
+		t.Fatalf("copied client %s was not reported as newly created", clientPath)
+	}
+}
+
+func pathSet(paths []string) map[string]bool {
+	set := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		set[path] = true
+	}
+	return set
 }
