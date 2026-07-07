@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	defaultOpenPTUID = 10001
-	defaultOpenPTGID = 10001
+	defaultOpenPTUID = 1000
+	defaultOpenPTGID = 1000
 )
 
 func main() {
@@ -24,7 +24,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "openpt-entrypoint: %v\n", err)
 		os.Exit(1)
 	}
-	if err := initDataDir(dataDir, appDir); err != nil {
+	createdPaths, err := initDataDir(dataDir, appDir)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "openpt-entrypoint: %v\n", err)
 		os.Exit(1)
 	}
@@ -36,7 +37,7 @@ func main() {
 		args = append([]string{"openpt"}, args...)
 	}
 	if os.Geteuid() == 0 {
-		fixPermissions(dataDir, runUID, runGID)
+		chownCreatedPaths(createdPaths, runUID, runGID)
 		if err := syscall.Setgid(runGID); err != nil {
 			fmt.Fprintf(os.Stderr, "openpt-entrypoint: setgid: %v\n", err)
 			os.Exit(1)
@@ -86,41 +87,66 @@ func getenvInt(keys []string, fallback int) (int, error) {
 	return fallback, nil
 }
 
-func initDataDir(dataDir, appDir string) error {
+func initDataDir(dataDir, appDir string) ([]string, error) {
+	var createdPaths []string
 	for _, dir := range []string{
+		dataDir,
 		filepath.Join(dataDir, "torrents"),
 		filepath.Join(dataDir, "clients"),
 		filepath.Join(dataDir, "torrents_archive"),
 	} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("create %s: %w", dir, err)
+		created, err := ensureDir(dir)
+		if err != nil {
+			return nil, err
+		}
+		if created {
+			createdPaths = append(createdPaths, dir)
 		}
 	}
 	configPath := filepath.Join(dataDir, "config.toml")
 	if _, err := os.Stat(configPath); errors.Is(err, os.ErrNotExist) {
 		if err := copyFile(filepath.Join(appDir, "examples", "config.docker.toml"), configPath); err != nil {
-			return fmt.Errorf("create default config: %w", err)
+			return nil, fmt.Errorf("create default config: %w", err)
 		}
+		createdPaths = append(createdPaths, configPath)
 		fmt.Printf("created default config: %s\n", configPath)
 	} else if err != nil {
-		return fmt.Errorf("stat %s: %w", configPath, err)
+		return nil, fmt.Errorf("stat %s: %w", configPath, err)
 	}
 	matches, err := filepath.Glob(filepath.Join(appDir, "clients", "*.client"))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, client := range matches {
 		target := filepath.Join(dataDir, "clients", filepath.Base(client))
 		if _, err := os.Stat(target); err == nil {
 			continue
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("stat %s: %w", target, err)
+			return nil, fmt.Errorf("stat %s: %w", target, err)
 		}
 		if err := copyFile(client, target); err != nil {
-			return fmt.Errorf("copy %s: %w", filepath.Base(client), err)
+			return nil, fmt.Errorf("copy %s: %w", filepath.Base(client), err)
 		}
+		createdPaths = append(createdPaths, target)
 	}
-	return nil
+	return createdPaths, nil
+}
+
+func ensureDir(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err == nil {
+		if !info.IsDir() {
+			return false, fmt.Errorf("%s exists and is not a directory", path)
+		}
+		return false, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("stat %s: %w", path, err)
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return false, fmt.Errorf("create %s: %w", path, err)
+	}
+	return true, nil
 }
 
 func copyFile(src, dst string) error {
@@ -141,20 +167,8 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-func fixPermissions(dataDir string, uid, gid int) {
-	_ = os.Chown(dataDir, uid, gid)
-	_ = filepath.WalkDir(filepath.Join(dataDir, "clients"), func(path string, _ os.DirEntry, err error) error {
-		if err == nil {
-			_ = os.Chown(path, uid, gid)
-		}
-		return nil
-	})
-	for _, path := range []string{
-		filepath.Join(dataDir, "torrents"),
-		filepath.Join(dataDir, "torrents_archive"),
-		filepath.Join(dataDir, "config.toml"),
-		filepath.Join(dataDir, "openpt_state.json"),
-	} {
+func chownCreatedPaths(paths []string, uid, gid int) {
+	for _, path := range paths {
 		_ = os.Chown(path, uid, gid)
 	}
 }

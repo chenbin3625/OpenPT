@@ -82,7 +82,7 @@ id -u
 id -g
 ```
 
-再把 `PUID`、`PGID` 改成对应数值。OpenPT 会以这个用户运行，便于读取 bind mount 进来的 `.torrent` 文件。
+再把 `PUID`、`PGID` 改成对应数值。OpenPT 会以这个用户运行，便于读取 bind mount 进来的 `.torrent` 文件。容器启动时不会修改宿主机上已经存在的目录或文件所有权。
 
 启动：
 
@@ -96,11 +96,11 @@ docker compose up -d
 ./data/torrents
 ```
 
-如果已有文件出现 `permission denied`，确认目录和种子文件对 `PUID/PGID` 对应的用户可读写：
+如果已有文件出现 `permission denied`，确认它们对 `PUID/PGID` 对应的用户可读写。例如只检查权限：
 
 ```sh
-sudo chown -R "$(id -u):$(id -g)" ./data
-chmod -R u+rwX ./data
+ls -ld ./data ./data/torrents ./data/torrents_archive
+ls -l ./data/torrents
 ```
 
 修改配置后重启容器：
