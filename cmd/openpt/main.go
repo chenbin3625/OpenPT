@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"openpt/internal/bandwidth"
 	"openpt/internal/clientemu"
@@ -105,6 +106,7 @@ func main() {
 			log.Warn("failed to reload config", "path", *configPath, "error", err)
 			continue
 		}
+		nextCfg = preserveRuntimeConfig(cfg, nextCfg)
 		if err := trackerClient.Configure(trackerOptions(nextCfg)); err != nil {
 			log.Warn("failed to reload tracker config", "error", err)
 			continue
@@ -121,6 +123,13 @@ func main() {
 	defer stopCancel()
 	s.Stop(stopCtx)
 	log.Info("OpenPT stopped")
+}
+
+func preserveRuntimeConfig(current, next config.Config) config.Config {
+	if current.UsesRandomAnnouncePort() && next.UsesRandomAnnouncePort() {
+		next.Announce.Port = current.Announce.Port
+	}
+	return next
 }
 
 func newLogger(cfg config.Config) (*slog.Logger, func(), error) {
@@ -163,6 +172,18 @@ func startMetricsServer(cfg config.Config, bw *bandwidth.Dispatcher, s *schedule
 		return nil, nil
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		if r.Method != http.MethodHead {
+			_, _ = io.WriteString(w, "ok\n")
+		}
+	})
 	mux.HandleFunc(cfg.Metrics.Path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		fmt.Fprintln(w, "# HELP openpt_bandwidth_current_rate_bps Current configured synthetic upload bandwidth in bytes per second.")
@@ -197,7 +218,13 @@ func startMetricsServer(cfg config.Config, bw *bandwidth.Dispatcher, s *schedule
 	if err != nil {
 		return nil, err
 	}
-	server := &http.Server{Addr: ln.Addr().String(), Handler: mux}
+	server := &http.Server{
+		Addr:              ln.Addr().String(),
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
 	go func() {
 		log.Info("metrics server started", "listen", server.Addr, "path", cfg.Metrics.Path)
 		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {

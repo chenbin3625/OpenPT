@@ -432,8 +432,8 @@ func (s *Store) removeFileQuiet(path string) *torrent.Torrent {
 func (s *Store) emit(ev Event, path string) {
 	select {
 	case s.events <- ev:
-	default:
-		s.log.Warn("torrent event queue full, dropping event", "path", path, "type", ev.Type)
+	case <-s.ctx.Done():
+		s.log.Debug("torrent event discarded during shutdown", "path", path, "type", ev.Type)
 	}
 }
 

@@ -103,6 +103,16 @@ scan_interval_seconds = -1
 	}
 }
 
+func TestInvalidShutdownStopTimeoutFails(t *testing.T) {
+	path := writeConfigTOML(t, `
+client = "qbittorrent.client"
+shutdown_stop_timeout_seconds = -1
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected invalid shutdown_stop_timeout_seconds to fail")
+	}
+}
+
 func TestNegativeSimultaneousSeedFails(t *testing.T) {
 	path := writeConfigTOML(t, `
 client = "qbittorrent.client"
@@ -139,15 +149,17 @@ proxy = "ftp://127.0.0.1:7890"
 }
 
 func TestInvalidMetricsPathFailsWhenMetricsEnabled(t *testing.T) {
-	path := writeConfigTOML(t, `
+	for _, metricsPath := range []string{"metrics", "/metrics/{name}", "/metrics?format=text"} {
+		path := writeConfigTOML(t, `
 client = "qbittorrent.client"
 
 [metrics]
 enabled = true
-path = "metrics"
+	path = "`+metricsPath+`"
 `)
-	if _, err := Load(path); err == nil {
-		t.Fatal("expected metrics.path without leading slash to fail")
+		if _, err := Load(path); err == nil {
+			t.Fatalf("expected metrics.path %q to fail", metricsPath)
+		}
 	}
 }
 
@@ -165,7 +177,7 @@ listen = "not-a-listen-address"
 }
 
 func TestMetricsPathCannotConflictWithWebUIRoutes(t *testing.T) {
-	for _, metricsPath := range []string{"/", "/api/status", "/api/config", "/api/events"} {
+	for _, metricsPath := range []string{"/", "/styles.css", "/openpt-icon.svg", "/api/status", "/api/config", "/api/events"} {
 		path := writeConfigTOML(t, `
 client = "qbittorrent.client"
 
@@ -180,6 +192,20 @@ path = "`+metricsPath+`"
 	}
 }
 
+func TestMetricsPathCannotConflictWithHealthRoute(t *testing.T) {
+	path := writeConfigTOML(t, `
+client = "qbittorrent.client"
+
+[metrics]
+enabled = true
+webui = false
+path = "/healthz"
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected /healthz to conflict even when web UI is disabled")
+	}
+}
+
 func TestDefaultValues(t *testing.T) {
 	cfg := loadConfigTOML(t, `client = "qbittorrent.client"`)
 
@@ -189,6 +215,9 @@ func TestDefaultValues(t *testing.T) {
 	}
 	if cfg.Announce.Port < randomAnnouncePortMin || cfg.Announce.Port > randomAnnouncePortMax {
 		t.Fatalf("default announce.port = %d, want %d..%d", cfg.Announce.Port, randomAnnouncePortMin, randomAnnouncePortMax)
+	}
+	if !cfg.UsesRandomAnnouncePort() {
+		t.Fatal("default announce port should retain its random-port origin")
 	}
 	if cfg.Uploaded.Strategy != "none" {
 		t.Fatalf("default uploaded.strategy = %q, want none", cfg.Uploaded.Strategy)
@@ -237,6 +266,9 @@ port = 51413
 `)
 	if cfg.Announce.Port != 51413 {
 		t.Fatalf("announce.port = %d, want 51413", cfg.Announce.Port)
+	}
+	if cfg.UsesRandomAnnouncePort() {
+		t.Fatal("configured announce port must not be marked random")
 	}
 }
 

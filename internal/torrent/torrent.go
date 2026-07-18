@@ -2,10 +2,13 @@ package torrent
 
 import (
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/anacrolix/torrent/metainfo"
 )
@@ -28,10 +31,19 @@ func Load(path string) (*Torrent, error) {
 	if err != nil {
 		return nil, err
 	}
-	hash := sha1.Sum(mi.InfoBytes)
+	var hash [20]byte
+	switch {
+	case info.HasV1():
+		hash = sha1.Sum(mi.InfoBytes)
+	case info.HasV2():
+		v2Hash := sha256.Sum256(mi.InfoBytes)
+		copy(hash[:], v2Hash[:20])
+	default:
+		return nil, fmt.Errorf("torrent info dictionary is neither v1 nor v2")
+	}
 	trackers := trackerList(mi)
 	if len(trackers) == 0 {
-		return nil, fmt.Errorf("no http/https tracker in torrent")
+		return nil, fmt.Errorf("no http/https/udp tracker in torrent")
 	}
 	return &Torrent{
 		Path:         path,
@@ -68,11 +80,18 @@ func trackerList(mi *metainfo.MetaInfo) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(s string) {
-		if (len(s) >= 7 && s[:7] == "http://") || (len(s) >= 8 && s[:8] == "https://") {
-			if !seen[s] {
-				seen[s] = true
-				out = append(out, s)
-			}
+		u, err := url.Parse(s)
+		if err != nil || u.Host == "" {
+			return
+		}
+		switch strings.ToLower(u.Scheme) {
+		case "http", "https", "udp":
+		default:
+			return
+		}
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
 		}
 	}
 	add(mi.Announce)

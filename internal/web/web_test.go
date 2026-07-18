@@ -82,6 +82,43 @@ func TestHandleConfigUsesCurrentSchedulerConfig(t *testing.T) {
 	}
 }
 
+func TestStylesheetIsServed(t *testing.T) {
+	h := New(nil, nil, nil)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/styles.css", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Content-Type"); got != "text/css; charset=utf-8" {
+		t.Fatalf("Content-Type = %q, want text/css; charset=utf-8", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("Cache-Control = %q, want no-cache", got)
+	}
+	if !strings.Contains(rec.Body.String(), ":root") {
+		t.Fatal("stylesheet response is empty")
+	}
+}
+
+func TestIconIsServed(t *testing.T) {
+	h := New(nil, nil, nil)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/openpt-icon.svg", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Content-Type"); got != "image/svg+xml" {
+		t.Fatalf("Content-Type = %q, want image/svg+xml", got)
+	}
+	if !strings.Contains(rec.Body.String(), "<title>OpenPT</title>") {
+		t.Fatal("icon response is empty")
+	}
+}
+
 // TestSSEEmitsHeartbeat 验证 SSE 端点在无数据变化时仍定期发送心跳注释行，
 // 防止中间代理 / 浏览器因空闲断开连接。
 func TestSSEEmitsHeartbeat(t *testing.T) {

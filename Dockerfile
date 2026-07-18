@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine AS build
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -37,6 +37,6 @@ COPY clients /app/clients
 
 VOLUME ["/data"]
 EXPOSE 9090
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s CMD openpt --version >/dev/null || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s CMD wget -q -T 2 -O /dev/null http://127.0.0.1:9090/healthz || exit 1
 ENTRYPOINT ["openpt-entrypoint"]
 CMD ["--config", "/data/config.toml"]

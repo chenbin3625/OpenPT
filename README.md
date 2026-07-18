@@ -1,4 +1,8 @@
-# OpenPT
+<p align="center">
+  <img src="internal/web/openpt-icon.svg" width="104" alt="OpenPT 图标">
+</p>
+
+<h1 align="center">OpenPT</h1>
 
 OpenPT 是一个轻量级、配置驱动的 BitTorrent Tracker Announce 工具，面向 PT 站保种场景。它只需要 `.torrent` 文件，不需要真实下载内容，通过模拟客户端向 Tracker 定期汇报做种状态、上传量、端口、客户端标识等信息。
 
@@ -17,9 +21,13 @@ OpenPT is a lightweight, configuration-driven BitTorrent tracker announce tool f
 - 根据 Tracker 返回的 peers 动态分配上传速度
 - 支持目标分享率，达到后自动停止该种子
 - Tracker 请求失败后自动指数退避重试
+- 支持 HTTP、HTTPS 和 UDP Tracker
+- 支持 BitTorrent v1、hybrid 和 v2-only 种子 info hash
+- 自动归档损坏或无法解析的种子文件，避免反复加载失败
+- 持久化累计上传量和已完成状态，重启后可继续运行
 - 删除种子文件后自动发送 `stopped` 上报并释放槽位
 - Web UI 实时展示状态、错误详情和当前配置
-- 暴露 Prometheus 格式指标
+- 暴露 Prometheus 格式指标和健康检查接口
 - 支持 `SIGHUP` 热重载部分配置
 
 ## 快速开始
@@ -172,6 +180,14 @@ file = ""
 
 `clients_dir`：客户端伪装配置目录。
 
+`archive_dir`：问题种子归档目录。损坏或无法解析的 `.torrent` 文件会在确认写入完成后移动到这里；同名文件不会被覆盖。
+
+`state_file`：状态持久化文件，保存累计上传量和已达到目标分享率的种子状态。
+
+`scan_interval_seconds`：扫描种子目录的间隔。
+
+`shutdown_stop_timeout_seconds`：退出时等待 `stopped` 上报完成的最长时间。
+
 ### Announce 配置
 
 `announce.port` 默认推荐设置为 `0`：
@@ -218,6 +234,8 @@ port = 51413
 proxy = "http://127.0.0.1:7890"
 ```
 
+代理仅用于 HTTP/HTTPS Tracker。配置代理后，UDP Tracker 会返回明确错误，调度器会继续尝试种子中的其它 Tracker。
+
 `failure_backoff_min_seconds` 和 `failure_backoff_max_seconds` 控制失败后的指数退避重试范围。
 
 ### Web UI 与指标
@@ -243,6 +261,14 @@ Prometheus 指标地址：
 ```text
 http://127.0.0.1:9090/metrics
 ```
+
+健康检查地址始终为：
+
+```text
+http://127.0.0.1:9090/healthz
+```
+
+`GET` 和 `HEAD` 请求成功时返回 `200 OK`。Docker 镜像也使用此接口执行容器健康检查。
 
 如果需要局域网访问，可将监听地址改成：
 
@@ -279,15 +305,22 @@ kill -HUP $(pidof openpt)
 - 同时保种数量
 - 上传策略和速率
 - 分享率目标
+- 关闭时等待 `stopped` 上报的超时时间
+- Announce 端口、IP 和 IPv6
 - Tracker 超时、代理和退避配置
+
+当 `announce.port = 0` 时，热重载会继续使用本次进程启动时生成的端口，不会因 `SIGHUP` 再次随机。
 
 需要重启后生效：
 
 - 客户端伪装文件
 - 种子目录
+- 问题种子归档目录
 - 客户端配置目录
+- 状态文件
+- 种子扫描间隔
 - 日志文件
-- Web UI 监听地址和指标路径
+- 监控服务开关、监听地址、指标路径和 Web UI 开关
 
 ## 使用提示
 
@@ -295,4 +328,4 @@ kill -HUP $(pidof openpt)
 - OpenPT 不会真实上传数据，只会向 Tracker 汇报上传量数字。
 - 默认 `announce.port = 0` 会在启动时随机端口；如需固定端口再手动设置具体值。
 - 建议从较保守的上传策略开始，确认站点表现正常后再调整速率。
-- 暂不支持 UDP Tracker，仅支持 HTTP/HTTPS Tracker。
+- 支持 HTTP、HTTPS 和 UDP Tracker；配置代理时 UDP Tracker 会明确报错并切换到其它 Tracker。

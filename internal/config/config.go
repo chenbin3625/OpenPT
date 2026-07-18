@@ -33,9 +33,10 @@ type Config struct {
 }
 
 type AnnounceConfig struct {
-	Port int    `toml:"port"`
-	IP   string `toml:"ip"`
-	IPv6 string `toml:"ipv6"`
+	Port       int    `toml:"port"`
+	IP         string `toml:"ip"`
+	IPv6       string `toml:"ipv6"`
+	randomPort bool
 }
 
 const (
@@ -134,6 +135,7 @@ func (c *Config) applyDefaults(configPath string) {
 	// simultaneous_seed 可以为 0（无限制，全量加载），负数交给 Validate 报错。
 	if c.Announce.Port == 0 {
 		c.Announce.Port = randomAnnouncePort()
+		c.Announce.randomPort = true
 	}
 	if c.Tracker.TimeoutSeconds == 0 {
 		c.Tracker.TimeoutSeconds = 15
@@ -264,6 +266,9 @@ func (c Config) Validate() error {
 	if c.ScanIntervalSeconds < 1 {
 		return errors.New("scan_interval_seconds must be at least 1")
 	}
+	if c.ShutdownStopTimeoutSeconds < 1 {
+		return errors.New("shutdown_stop_timeout_seconds must be at least 1")
+	}
 	if err := validateProxy(c.Tracker.Proxy); err != nil {
 		return err
 	}
@@ -271,15 +276,28 @@ func (c Config) Validate() error {
 		if err := validateListenAddress(c.Metrics.Listen); err != nil {
 			return err
 		}
-		if !strings.HasPrefix(c.Metrics.Path, "/") {
-			return errors.New("metrics.path must start with /")
+		if err := validateMetricsPath(c.Metrics.Path); err != nil {
+			return err
+		}
+		if c.Metrics.Path == "/healthz" {
+			return fmt.Errorf("metrics.path %q conflicts with health check route", c.Metrics.Path)
 		}
 		if c.Metrics.WebUI {
 			switch c.Metrics.Path {
-			case "/", "/api/status", "/api/config", "/api/events":
+			case "/", "/styles.css", "/openpt-icon.svg", "/api/status", "/api/config", "/api/events":
 				return fmt.Errorf("metrics.path %q conflicts with web UI routes", c.Metrics.Path)
 			}
 		}
+	}
+	return nil
+}
+
+func validateMetricsPath(path string) error {
+	if !strings.HasPrefix(path, "/") {
+		return errors.New("metrics.path must start with /")
+	}
+	if strings.ContainsAny(path, "{}?# \t\r\n") {
+		return errors.New("metrics.path must be a literal URL path without wildcards, query, fragment, or whitespace")
 	}
 	return nil
 }
@@ -317,6 +335,10 @@ func validateListenAddress(listen string) error {
 
 func (c Config) TrackerTimeout() time.Duration {
 	return time.Duration(c.Tracker.TimeoutSeconds) * time.Second
+}
+
+func (c Config) UsesRandomAnnouncePort() bool {
+	return c.Announce.randomPort
 }
 
 func (c Config) TrackerIdleConnTimeout() time.Duration {
