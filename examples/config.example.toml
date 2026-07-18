@@ -11,7 +11,7 @@ simultaneous_seed = 200
 
 # 客户端模拟文件
 # 从 clients_dir 目录中选择一个客户端配置文件
-# 例如：qbittorrent-5.1.4.client, transmission-4.0.6.client 等
+# 例如：qbittorrent-5.1.4.client, transmission-3.00.client 等
 client = "qbittorrent-5.1.4.client"
 
 

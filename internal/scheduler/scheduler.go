@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -35,6 +36,8 @@ const (
 const maxConcurrentStopped = 8
 
 const statePersistInterval = 5 * time.Second
+
+const ratioCheckInterval = time.Second
 
 type Result struct {
 	NextEvent clientemu.Event
@@ -146,10 +149,12 @@ func New(cfg config.Config, emu *clientemu.Client, tc *tracker.Client, bw *bandw
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
+	s.reconcileCompleted()
 	s.fillSlots(ctx)
 	if s.stateFile != "" {
 		go s.persistStateLoop(ctx)
 	}
+	go s.monitorRatioTargets(ctx)
 	go func() {
 		for {
 			select {
@@ -215,8 +220,33 @@ func (s *Scheduler) FillSlots(ctx context.Context) {
 }
 
 func (s *Scheduler) Reconcile(ctx context.Context) {
+	s.reconcileCompleted()
 	s.stopOverflow(ctx)
 	s.fillSlots(ctx)
+}
+
+func (s *Scheduler) reconcileCompleted() {
+	cfg := s.config()
+	sizes := make(map[[20]byte]int64)
+	for _, t := range s.store.List() {
+		sizes[t.InfoHash] = t.Size
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for hash := range s.completed {
+		size, exists := sizes[hash]
+		if !exists {
+			continue
+		}
+		st := s.persisted[hash]
+		if ratioReached(cfg.Uploaded.RatioTarget, size, st.Uploaded) {
+			continue
+		}
+		delete(s.completed, hash)
+		st.Completed = false
+		s.persisted[hash] = st
+	}
 }
 
 func (s *Scheduler) config() config.Config {
@@ -467,6 +497,35 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 	}
 }
 
+func (s *Scheduler) monitorRatioTargets(ctx context.Context) {
+	ticker := time.NewTicker(ratioCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		cfg := s.config()
+		if cfg.Uploaded.RatioTarget <= 0 {
+			continue
+		}
+		s.mu.Lock()
+		active := make([]*announcer, 0, len(s.active))
+		for _, a := range s.active {
+			active = append(active, a)
+		}
+		s.mu.Unlock()
+		for _, a := range active {
+			stats := s.bw.Get(a.torrent.InfoHashHex())
+			if ratioReached(cfg.Uploaded.RatioTarget, a.torrent.Size, stats.Uploaded) {
+				s.completeTorrent(ctx, a, cfg.Uploaded.RatioTarget)
+			}
+		}
+	}
+}
+
 func (s *Scheduler) announce(ctx context.Context, a *announcer, event clientemu.Event) (tracker.Response, error) {
 	return s.announceWithStats(ctx, a, event, s.bw.Get(a.torrent.InfoHashHex()))
 }
@@ -509,41 +568,34 @@ func (s *Scheduler) ActiveCount() int {
 }
 
 func (s *Scheduler) completeTorrent(ctx context.Context, a *announcer, ratioTarget float64) {
-	s.log.Info("ratio target reached; completing torrent", "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex(), "ratio_target", ratioTarget)
 	stats := s.bw.Get(a.torrent.InfoHashHex())
 	stopCtx := a.fillContext(ctx)
-	// 标记为已完成，防止重新添加
-	s.markCompleted(a.torrent.InfoHash)
-	s.rememberCompleted(a.torrent.InfoHash, stats.Uploaded)
+
+	s.mu.Lock()
+	if s.active[a.torrent.InfoHash] != a {
+		s.mu.Unlock()
+		return
+	}
+	if a.cancel != nil {
+		a.cancel()
+	}
+	delete(s.active, a.torrent.InfoHash)
+	s.completed[a.torrent.InfoHash] = true
+	st := s.persisted[a.torrent.InfoHash]
+	if stats.Uploaded > st.Uploaded {
+		st.Uploaded = stats.Uploaded
+	}
+	st.Completed = true
+	s.persisted[a.torrent.InfoHash] = st
+	s.mu.Unlock()
+
+	s.log.Info("ratio target reached; completing torrent", "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex(), "ratio_target", ratioTarget)
 	s.bw.Unregister(a.torrent.InfoHashHex())
-	s.removeActive(a.torrent.InfoHash)
-	// removeActive 后 announcer 自身 ctx 已取消，异步发送 stopped announce
 	if a.isStarted() {
 		s.sendStoppedAsync(stopCtx, a, stats)
 	}
 	s.fillSlots(stopCtx)
 	s.persistState()
-}
-
-// markCompleted 标记种子为已完成状态，防止重新调度
-func (s *Scheduler) markCompleted(hash [20]byte) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.completed[hash] = true
-}
-
-func (s *Scheduler) rememberCompleted(hash [20]byte, uploaded int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if uploaded < 0 {
-		uploaded = 0
-	}
-	st := s.persisted[hash]
-	if uploaded > st.Uploaded {
-		st.Uploaded = uploaded
-	}
-	st.Completed = true
-	s.persisted[hash] = st
 }
 
 func loadPersistedState(path string, log *slog.Logger) (map[[20]byte]persistedTorrentState, map[[20]byte]bool) {
@@ -694,8 +746,8 @@ func eventName(e clientemu.Event) string {
 }
 
 func trackerHost(raw string) string {
-	for _, prefix := range []string{"http://", "https://"} {
-		raw = strings.TrimPrefix(raw, prefix)
+	if parsed, err := url.Parse(raw); err == nil && parsed.Host != "" {
+		return parsed.Host
 	}
 	for i, ch := range raw {
 		if ch == '/' || ch == '?' {

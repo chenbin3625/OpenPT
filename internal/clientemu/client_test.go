@@ -10,6 +10,25 @@ import (
 	"time"
 )
 
+func TestAllBundledClientsLoad(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("..", "..", "clients", "*.client"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no bundled client files found")
+	}
+	for _, path := range paths {
+		path := path
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			t.Parallel()
+			if _, err := LoadClient(path); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestLoadClientJSONAndRenderQuery(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "qb.client")
 	err := os.WriteFile(path, []byte(`{

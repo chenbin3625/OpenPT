@@ -384,6 +384,38 @@ func TestRecentInvalidTorrentIsNotArchived(t *testing.T) {
 	}
 }
 
+func TestEmitWaitsForQueueCapacityInsteadOfDroppingEvent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := New(ctx, t.TempDir(), "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	for i := 0; i < cap(s.events); i++ {
+		s.events <- Event{Type: Added}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.emit(Event{Type: Removed}, "queued.torrent")
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("emit returned while the event queue was full")
+	case <-time.After(20 * time.Millisecond):
+	}
+	<-s.events
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("emit did not resume after queue capacity became available")
+	}
+	for len(s.events) > 1 {
+		<-s.events
+	}
+	if ev := <-s.events; ev.Type != Removed {
+		t.Fatalf("last event type = %v, want Removed", ev.Type)
+	}
+}
+
 func receiveEvent(t *testing.T, s *Store) Event {
 	t.Helper()
 	return receiveEventBefore(t, s, time.Second)

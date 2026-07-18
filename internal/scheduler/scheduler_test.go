@@ -274,6 +274,50 @@ func TestPersistedCompletedTorrentIsNotRescheduled(t *testing.T) {
 	}
 }
 
+func TestCompletedTorrentResumesWhenRatioTargetDisabled(t *testing.T) {
+	server := trackerResponseServer("d8:intervali3600e8:completei2e10:incompletei1ee")
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	torrentsDir := filepath.Join(dir, "torrents")
+	if err := os.MkdirAll(torrentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(torrentsDir, "resume.torrent")
+	writeTestTorrent(t, path, server.URL, "resume.bin", 100)
+	loaded, err := torrentpkg.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "state.json")
+	writeStateFile(t, stateFile, loaded.InfoHashHex(), 100, true)
+	s := newTestSchedulerWithState(t, ctx, server.URL, torrentsDir, stateFile)
+	cfg := s.config()
+	cfg.Uploaded.RatioTarget = 0
+	s.UpdateConfig(cfg)
+	s.Reconcile(ctx)
+	if got := s.ActiveCount(); got != 1 {
+		t.Fatalf("active count = %d, want 1 after disabling ratio target", got)
+	}
+}
+
+func TestRatioMonitorStopsBeforeNextAnnounce(t *testing.T) {
+	recorder := newTrackerEventRecorder("d8:intervali3600e8:completei2e10:incompletei1ee")
+	defer recorder.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := newTestScheduler(t, ctx, recorder.URL, 1, 1)
+	cfg := s.config()
+	cfg.Uploaded.RatioTarget = 1
+	s.UpdateConfig(cfg)
+	s.Start(ctx)
+	waitUntil(t, func() bool { return recorder.Count("started") == 1 })
+	a := activeAnnouncer(t, s)
+	s.bw.Restore(a.torrent.InfoHashHex(), bandwidth.Stats{Uploaded: a.torrent.Size})
+	waitUntil(t, func() bool { return recorder.Count("stopped") == 1 && s.ActiveCount() == 0 })
+}
+
 func TestPersistedUploadedIsRestoredForStartedAnnounce(t *testing.T) {
 	recorder := newTrackerEventRecorder("d8:intervali3600e8:completei2e10:incompletei1ee")
 	defer recorder.Close()
@@ -398,7 +442,7 @@ func newTestSchedulerWithState(t *testing.T, ctx context.Context, announce, torr
 		SimultaneousSeed: 1,
 		Announce:         config.AnnounceConfig{Port: 6881},
 		Tracker:          config.TrackerConfig{FailureBackoffMinSeconds: 1, FailureBackoffMaxSeconds: 1},
-		Uploaded:         config.UploadedConfig{Strategy: "none"},
+		Uploaded:         config.UploadedConfig{Strategy: "none", RatioTarget: 1},
 	}, emu, tc, bw, st, log)
 }
 

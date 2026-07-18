@@ -17,6 +17,12 @@ import (
 //go:embed index.html
 var indexHTML []byte
 
+//go:embed styles.css
+var stylesCSS []byte
+
+//go:embed openpt-icon.svg
+var iconSVG []byte
+
 const (
 	// sseStatusPollInterval 是 SSE 端点检查状态是否变化并推送的间隔。
 	sseStatusPollInterval = 2 * time.Second
@@ -63,9 +69,23 @@ func New(st *store.Store, s *scheduler.Scheduler, bw *bandwidth.Dispatcher) *Han
 // RegisterRoutes registers the web UI routes on the given mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/", h.handleIndex)
+	mux.HandleFunc("/styles.css", h.handleStyles)
+	mux.HandleFunc("/openpt-icon.svg", h.handleIcon)
 	mux.HandleFunc("/api/status", h.handleStatus)
 	mux.HandleFunc("/api/config", h.handleConfig)
 	mux.HandleFunc("/api/events", h.handleEvents)
+}
+
+func (h *Handler) handleStyles(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(stylesCSS)
+}
+
+func (h *Handler) handleIcon(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(iconSVG)
 }
 
 func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
