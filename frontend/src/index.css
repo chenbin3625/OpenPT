@@ -1,0 +1,70 @@
+:root {
+    --page-width: 1680px;
+}
+
+body {
+    margin: 0;
+    background: #f6f7f9;
+}
+
+/* 顶部吸顶条：品牌 + 统计数据带 */
+.app-header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.app-header-inner {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    max-width: var(--page-width);
+    margin: 0 auto;
+}
+
+.main-container {
+    max-width: var(--page-width);
+    margin: 0 auto;
+    padding: 14px 20px 24px;
+}
+
+/* 表格卡：无边框、头部收紧 */
+.table-card .ant-card-head {
+    padding-inline: 14px;
+}
+
+.table-card .ant-card-head-title,
+.table-card .ant-card-extra {
+    padding-block: 10px;
+}
+
+/* 异常行高亮 */
+.ant-table-tbody > tr.issue > td {
+    background: #fff8f8;
+}
+
+.ant-table-tbody > tr.issue:hover > td {
+    background: #fee2e2;
+}
+
+@media (max-width: 1200px) {
+    .app-header-inner {
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+}
+
+@media (max-width: 768px) {
+    .app-header {
+        position: static;
+        padding-block: 8px;
+    }
+
+    .main-container {
+        padding-inline: 10px;
+    }
+}

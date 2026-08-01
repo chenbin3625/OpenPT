@@ -15,12 +15,55 @@ env:
   DOCKER_IMAGE: ${{ vars.DOCKERHUB_REPOSITORY || 'chenbin3625/openpt' }}
 
 jobs:
-  test:
-    name: Test
+  frontend:
+    name: Build Web UI
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: web
+
+      # 打包为单个 tar 再上传，避免 upload/download-artifact@v4 对目录的
+      # 相对路径处理差异导致下游 go:embed 找不到 dist
+      - name: Package dist
+        run: tar -czf openpt-dist.tar.gz -C internal/web dist
+
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: openpt-dist
+          path: openpt-dist.tar.gz
+          if-no-files-found: error
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: openpt-dist
+
+      - name: Extract frontend dist
+        run: tar -xzf openpt-dist.tar.gz -C internal/web
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -46,7 +89,7 @@ jobs:
   binaries:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}${{ matrix.goarm && format('/v{0}', matrix.goarm) || '' }}
     runs-on: ubuntu-latest
-    needs: test
+    needs: frontend
     strategy:
       fail-fast: false
       matrix:
@@ -86,6 +129,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: openpt-dist
+
+      - name: Extract frontend dist
+        run: tar -xzf openpt-dist.tar.gz -C internal/web
 
       - name: Setup Go
         uses: actions/setup-go@v5

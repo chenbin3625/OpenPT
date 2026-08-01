@@ -9,6 +9,7 @@ openpt
 *.log
 tmp
 dist
+node_modules
 volumes
 data
 config.toml

@@ -1,9 +1,10 @@
 package web
 
 import (
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
@@ -14,11 +15,8 @@ import (
 	"openpt/internal/store"
 )
 
-//go:embed index.html
-var indexHTML []byte
-
-//go:embed styles.css
-var stylesCSS []byte
+//go:embed all:dist
+var distFS embed.FS
 
 //go:embed openpt-icon.svg
 var iconSVG []byte
@@ -68,33 +66,42 @@ func New(st *store.Store, s *scheduler.Scheduler, bw *bandwidth.Dispatcher) *Han
 
 // RegisterRoutes registers the web UI routes on the given mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/", h.handleIndex)
-	mux.HandleFunc("/styles.css", h.handleStyles)
+	assets, err := fs.Sub(distFS, "dist")
+	if err != nil {
+		// go:embed 保证 dist 存在，此处仅防御
+		panic("web: embedded dist missing: " + err.Error())
+	}
+	mux.Handle("/assets/", http.FileServer(http.FS(assets)))
+	mux.HandleFunc("/", h.handleIndex(assets))
 	mux.HandleFunc("/openpt-icon.svg", h.handleIcon)
 	mux.HandleFunc("/api/status", h.handleStatus)
 	mux.HandleFunc("/api/config", h.handleConfig)
 	mux.HandleFunc("/api/events", h.handleEvents)
 }
 
-func (h *Handler) handleStyles(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	_, _ = w.Write(stylesCSS)
+// handleIndex 返回一个处理函数，仅当路径为 / 时返回内嵌的 index.html，
+// 其余路径返回 404，由 /assets/ 与 API 路由自行接管。
+func (h *Handler) handleIndex(assets fs.FS) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		data, err := fs.ReadFile(assets, "index.html")
+		if err != nil {
+			http.Error(w, "index.html not found", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write(data)
+	}
 }
 
 func (h *Handler) handleIcon(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = w.Write(iconSVG)
-}
-
-func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(indexHTML)
 }
 
 func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
