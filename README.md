@@ -117,6 +117,25 @@ ls -l ./data/torrents
 docker compose restart
 ```
 
+## 从源码构建
+
+Web UI 使用 Vite + React + antd 构建，产物通过 `go:embed` 内嵌进二进制，
+因此 **`go build` / `go test` 前必须先构建前端**：
+
+```sh
+# 1. 构建前端（输出到 internal/web/dist）
+cd web
+npm ci
+npm run build
+cd ..
+
+# 2. 构建 Go 二进制（内嵌前端产物）
+go build -o openpt ./cmd/openpt
+```
+
+> 前端开发时可在 `web/` 目录运行 `npm run dev`，Vite 会启动本地开发服务器
+> 并代理到 OpenPT 的 API。发布版本直接使用内嵌产物，无需额外资源目录。
+
 ## 配置方法
 
 OpenPT 使用 TOML 配置文件。推荐从示例文件复制：

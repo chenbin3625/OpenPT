@@ -1,3 +1,12 @@
+# ---- 前端构建（Vite + React + antd，产物输出到 ../internal/web/dist）----
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
+# ---- Go 构建 ----
 FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine AS build
 
 WORKDIR /src
@@ -5,6 +14,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+COPY --from=frontend /src/internal/web/dist ./internal/web/dist
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 ARG TARGETVARIANT

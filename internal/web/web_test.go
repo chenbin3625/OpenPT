@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -82,23 +83,54 @@ func TestHandleConfigUsesCurrentSchedulerConfig(t *testing.T) {
 	}
 }
 
-func TestStylesheetIsServed(t *testing.T) {
+func TestIndexServesBuiltApp(t *testing.T) {
 	h := New(nil, nil, nil)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/styles.css", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
-	if got := rec.Header().Get("Content-Type"); got != "text/css; charset=utf-8" {
-		t.Fatalf("Content-Type = %q, want text/css; charset=utf-8", got)
+	if got := rec.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Fatalf("Content-Type = %q, want text/html; charset=utf-8", got)
 	}
-	if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
-		t.Fatalf("Cache-Control = %q, want no-cache", got)
+	body := rec.Body.String()
+	if !strings.Contains(body, `<div id="root">`) {
+		t.Fatal("index.html does not contain the React root element")
 	}
-	if !strings.Contains(rec.Body.String(), ":root") {
-		t.Fatal("stylesheet response is empty")
+	if !strings.Contains(body, "assets/") {
+		t.Fatal("index.html does not reference built assets")
+	}
+}
+
+// TestAssetIsServed 验证内嵌的构建产物（如 JS/CSS）能通过 /assets/ 正常访问，
+// 确保 go:embed all:dist 与静态文件路由工作正常。
+func TestAssetIsServed(t *testing.T) {
+	h := New(nil, nil, nil)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	indexReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	indexRec := httptest.NewRecorder()
+	mux.ServeHTTP(indexRec, indexReq)
+	m := regexp.MustCompile(`src="(/assets/[^"]+\.js)"`).FindStringSubmatch(indexRec.Body.String())
+	if len(m) < 2 {
+		t.Fatal("no JS asset referenced in index.html")
+	}
+
+	assetReq := httptest.NewRequest(http.MethodGet, m[1], nil)
+	assetRec := httptest.NewRecorder()
+	mux.ServeHTTP(assetRec, assetReq)
+
+	if assetRec.Code != http.StatusOK {
+		t.Fatalf("asset %s returned %d, want 200", m[1], assetRec.Code)
+	}
+	if !strings.Contains(assetRec.Header().Get("Content-Type"), "javascript") {
+		t.Fatalf("asset Content-Type = %q, want javascript", assetRec.Header().Get("Content-Type"))
+	}
+	if len(assetRec.Body.Bytes()) < 1000 {
+		t.Fatalf("asset body suspiciously small: %d bytes", len(assetRec.Body.Bytes()))
 	}
 }
 
