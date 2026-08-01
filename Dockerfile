@@ -1,9 +1,9 @@
 # ---- 前端构建（Vite + React + antd，产物输出到 ../internal/web/dist）----
 FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
-WORKDIR /src/web
-COPY web/package.json web/package-lock.json ./
+WORKDIR /src/frontend
+COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
-COPY web/ ./
+COPY frontend/ ./
 RUN npm run build
 
 # ---- Go 构建 ----
