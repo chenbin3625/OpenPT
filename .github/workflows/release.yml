@@ -27,15 +27,15 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
-        working-directory: web
+        working-directory: frontend
 
       - name: Build frontend
         run: npm run build
-        working-directory: web
+        working-directory: frontend
 
       # 打包为单个 tar 再上传，避免 upload/download-artifact@v4 对目录的
       # 相对路径处理差异导致下游 go:embed 找不到 dist

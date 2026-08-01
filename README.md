@@ -124,7 +124,7 @@ Web UI 使用 Vite + React + antd 构建，产物通过 `go:embed` 内嵌进二�
 
 ```sh
 # 1. 构建前端（输出到 internal/web/dist）
-cd web
+cd frontend
 npm ci
 npm run build
 cd ..
@@ -133,7 +133,7 @@ cd ..
 go build -o openpt ./cmd/openpt
 ```
 
-> 前端开发时可在 `web/` 目录运行 `npm run dev`，Vite 会启动本地开发服务器
+> 前端开发时可在 `frontend/` 目录运行 `npm run dev`，Vite 会启动本地开发服务器
 > 并代理到 OpenPT 的 API。发布版本直接使用内嵌产物，无需额外资源目录。
 
 ## 配置方法
