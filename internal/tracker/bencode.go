@@ -114,11 +114,13 @@ func parseValue(data []byte, depth int) (any, []byte, error) {
 			return nil, nil, err
 		}
 		start := colon + 1
-		end := start + n
-		if end > len(data) {
-			return nil, nil, fmt.Errorf("string exceeds input")
+		// n 来自不可信的 tracker 响应：拒绝负数，并改用 len(data)-start 做边界检查，
+		// 避免 start+n 在 n 接近 MaxInt64 时回绕为负数、绕过 end > len(data) 检查
+		// 导致切片越界 panic。
+		if n < 0 || n > len(data)-start {
+			return nil, nil, fmt.Errorf("string length %d out of range", n)
 		}
-		return string(data[start:end]), data[end:], nil
+		return string(data[start : start+n]), data[start+n:], nil
 	}
 }
 

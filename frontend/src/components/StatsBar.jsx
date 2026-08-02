@@ -21,7 +21,14 @@ const CONN_META = {
 export default function StatsBar({ stats, conn }) {
     const { token } = theme.useToken();
     const connMeta = CONN_META[conn] || CONN_META.connecting;
-    const next = stats.nextTs === Number.MAX_SAFE_INTEGER ? '暂无' : formatRelative(new Date(stats.nextTs).toISOString());
+    // 上报在途时某种子的 next_announce_at 会瞬时落在过去，显示"X 前"语义错误，
+    // 改为"即将上报"
+    const next =
+        stats.nextTs === Number.MAX_SAFE_INTEGER
+            ? '暂无'
+            : stats.nextTs <= Date.now()
+            ? '即将上报'
+            : formatRelative(new Date(stats.nextTs).toISOString());
 
     const items = [
         { label: '活跃种子', value: stats.total, icon: <InboxOutlined />, color: token.colorPrimary },

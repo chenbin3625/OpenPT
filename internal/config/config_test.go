@@ -177,7 +177,7 @@ listen = "not-a-listen-address"
 }
 
 func TestMetricsPathCannotConflictWithWebUIRoutes(t *testing.T) {
-	for _, metricsPath := range []string{"/", "/styles.css", "/openpt-icon.svg", "/api/status", "/api/config", "/api/events"} {
+	for _, metricsPath := range []string{"/", "/assets/", "/openpt-icon.svg", "/api/status", "/api/config", "/api/events"} {
 		path := writeConfigTOML(t, `
 client = "qbittorrent.client"
 
@@ -189,6 +189,21 @@ path = "`+metricsPath+`"
 		if _, err := Load(path); err == nil {
 			t.Fatalf("expected metrics.path %q to conflict with web UI routes", metricsPath)
 		}
+	}
+}
+
+func TestMetricsPathMayUseRemovedLegacyRoutes(t *testing.T) {
+	// /styles.css 在 v0.2.0 已被 web 路由移除，不再冲突，应允许作为 metrics.path
+	path := writeConfigTOML(t, `
+client = "qbittorrent.client"
+
+[metrics]
+enabled = true
+webui = true
+path = "/styles.css"
+`)
+	if _, err := Load(path); err != nil {
+		t.Fatalf("expected metrics.path /styles.css to be allowed, got error: %v", err)
 	}
 }
 

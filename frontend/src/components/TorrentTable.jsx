@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import {
     Card,
     Table,
@@ -114,11 +114,12 @@ const StatusDetail = ({ t }) => {
 // 搜索输入防抖
 function useDebouncedValue(value, delay = 150) {
     const [debounced, setDebounced] = useState(value);
-    const timer = useRef(null);
-    if (value !== debounced) {
-        clearTimeout(timer.current);
-        timer.current = setTimeout(() => setDebounced(value), delay);
-    }
+    // 在 effect 中调度定时器：value 每次变化（含清空回空串）都会取消上一个
+    // 待触发定时器，卸载时也会清理，避免残留旧值或对已卸载组件 setState。
+    useEffect(() => {
+        const id = setTimeout(() => setDebounced(value), delay);
+        return () => clearTimeout(id);
+    }, [value, delay]);
     return debounced;
 }
 

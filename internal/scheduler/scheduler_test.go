@@ -339,6 +339,12 @@ func TestPersistedUploadedIsRestoredForStartedAnnounce(t *testing.T) {
 	writeStateFile(t, stateFile, loaded.InfoHashHex(), 321, false)
 
 	s := newTestSchedulerWithState(t, ctx, recorder.URL, torrentsDir, stateFile)
+	// 本测试只验证 started announce 使用恢复的上传量，与分享率无关。
+	// 禁用 ratio target，避免 loop 在 started 上报后立即 completeTorrent -> persistState，
+	// 与 TempDir 清理产生竞态（在测试返回后仍写 state.json 导致清理失败）。
+	cfg := s.config()
+	cfg.Uploaded.RatioTarget = 0
+	s.UpdateConfig(cfg)
 	s.fillSlots(ctx)
 	waitUntil(t, func() bool {
 		return recorder.Count("started") == 1
@@ -419,6 +425,73 @@ func TestReplacingTorrentFileStopsOldTorrentAndStartsNewOne(t *testing.T) {
 		status := s.Status()
 		return len(status) == 1 && status[0].Name == "new.bin"
 	})
+}
+
+func TestReplacingTorrentWithSameInfoHashPreservesUpload(t *testing.T) {
+	recorder1 := newTrackerEventRecorder("d8:intervali3600e8:completei2e10:incompletei1ee")
+	defer recorder1.Close()
+	recorder2 := newTrackerEventRecorder("d8:intervali3600e8:completei2e10:incompletei1ee")
+	defer recorder2.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	torrentsDir := filepath.Join(dir, "torrents")
+	if err := os.MkdirAll(torrentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(torrentsDir, "same.torrent")
+	writeTestTorrent(t, path, recorder1.URL, "same.bin", 100)
+	loaded, err := torrentpkg.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "state.json")
+	writeStateFile(t, stateFile, loaded.InfoHashHex(), 500, false)
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st := store.NewWithScanInterval(ctx, torrentsDir, "", 20*time.Millisecond, log)
+	if err := st.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	tc, err := tracker.New(tracker.Options{Timeout: time.Second, ReuseConnections: true, MaxIdleConns: 10, MaxIdleConnsPerHost: 10, IdleConnTimeout: time.Second}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emu, err := newTestClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bw := bandwidth.New(bandwidth.Config{})
+	s := New(config.Config{
+		StateFile:        stateFile,
+		SimultaneousSeed: 1,
+		Announce:         config.AnnounceConfig{Port: 6881},
+		Tracker:          config.TrackerConfig{FailureBackoffMinSeconds: 1, FailureBackoffMaxSeconds: 1},
+		Uploaded:         config.UploadedConfig{Strategy: "none"},
+	}, emu, tc, bw, st, log)
+	s.Start(ctx)
+
+	// 首次 started 应使用恢复的上传量 500
+	waitUntil(t, func() bool { return recorder1.Count("started") == 1 })
+	if got := recorder1.LastUploaded("started"); got != 500 {
+		t.Fatalf("started uploaded = %d, want restored 500", got)
+	}
+
+	// 同 infohash（同名/同尺寸）替换 announce 列表（如更新 passkey/换 tracker）
+	tmpPath := filepath.Join(torrentsDir, "same.tmp")
+	writeTestTorrent(t, tmpPath, recorder2.URL, "same.bin", 100)
+	if err := os.Rename(tmpPath, path); err != nil {
+		t.Fatal(err)
+	}
+
+	// 旧 tracker 收到 stopped，新 tracker 收到 started，且上传量保持 500 不清零
+	waitUntil(t, func() bool {
+		return recorder1.Count("stopped") == 1 && recorder2.Count("started") == 1
+	})
+	if got := recorder2.LastUploaded("started"); got != 500 {
+		t.Fatalf("re-started uploaded = %d, want preserved 500", got)
+	}
 }
 
 func newTestSchedulerWithState(t *testing.T, ctx context.Context, announce, torrentsDir, stateFile string) *Scheduler {

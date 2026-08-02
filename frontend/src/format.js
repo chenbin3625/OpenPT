@@ -1,8 +1,11 @@
 export const formatBytes = n => {
     n = Number(n || 0);
     if (n === 0) return '0 B';
-    const u = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(n) / Math.log(1024));
+    const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+    // 超大值（>= 1 PiB）或非有限数时封顶到最大单位，避免 u[i] 为 undefined
+    let i = Math.floor(Math.log(n) / Math.log(1024));
+    if (!Number.isFinite(i) || i < 0) i = 0;
+    if (i >= u.length) i = u.length - 1;
     return (n / Math.pow(1024, i)).toFixed(2) + ' ' + u[i];
 };
 

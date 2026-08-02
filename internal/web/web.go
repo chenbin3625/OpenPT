@@ -52,6 +52,14 @@ type Handler struct {
 	scheduler         *scheduler.Scheduler
 	bw                *bandwidth.Dispatcher
 	heartbeatInterval time.Duration
+	// shutdown 在服务停机时被关闭，SSE 处理器据此主动退出，
+	// 使 http.Server.Shutdown 不必等待长连接自然结束。nil 表示未注入（select 恒阻塞）。
+	shutdown <-chan struct{}
+}
+
+// SetShutdownSignal 注入停机信号：服务 Shutdown 开始时关闭 ch，SSE 连接随即断开。
+func (h *Handler) SetShutdownSignal(ch <-chan struct{}) {
+	h.shutdown = ch
 }
 
 // New creates a new web Handler.
@@ -248,6 +256,8 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-h.shutdown: // nil channel 恒阻塞，未注入时不影响正常流程
 			return
 		case <-ticker.C:
 			if !h.sendStatusIfChanged(w, flusher, &lastHash) {

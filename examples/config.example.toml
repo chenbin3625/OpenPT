@@ -60,12 +60,16 @@ strategy = "configured_rate"
 configured_rate_bps = 170000
 
 # 最小上传速率（字节/秒）
-# 30000 字节/秒 ≈ 29 KB/s
-min_rate_bps = 30000
+# 设为 0 表示不单独限制下限：波动范围由 random_jitter_percent 在 configured_rate_bps 周围生成。
+# 若要自定义固定范围（如 30KB/s ~ 170KB/s），改为
+#   min_rate_bps = 30000
+#   max_rate_bps = 170000
+# 注意：min/max 同时非 0 时优先于 random_jitter_percent。
+min_rate_bps = 0
 
 # 最大上传速率（字节/秒）
-# 170000 字节/秒 ≈ 166 KB/s
-max_rate_bps = 170000
+# 设为 0 表示不单独限制上限：波动范围由 random_jitter_percent 在 configured_rate_bps 周围生成。
+max_rate_bps = 0
 
 # 保守上传速率（仅在 strategy = "conservative_rate" 时生效）
 # 1024 字节/秒 = 1 KB/s
