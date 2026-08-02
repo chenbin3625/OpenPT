@@ -29,6 +29,7 @@ const (
 	StopReasonRemoved     stopReason = iota // 种子文件被删除
 	StopReasonManual                        // 用户手动停止/热重载
 	StopReasonRatioTarget                   // 达到分享率目标
+	StopReasonReplaced                      // 同 infohash 种子文件被替换（announce 列表变化）
 )
 
 // maxConcurrentStopped 限制并发 stopped announce 的数量，避免批量删除种子时
@@ -38,6 +39,12 @@ const maxConcurrentStopped = 8
 const statePersistInterval = 5 * time.Second
 
 const ratioCheckInterval = time.Second
+
+// maxAnnounceIntervalSeconds 是 tracker interval 的防御性上限。
+// interval 来自不可信的 tracker 响应，数值接近 int64 上限时
+// time.Duration(seconds)*time.Second 会溢出为负，导致 nextAnnounce 落在过去、
+// 定时器立即触发，失去节流地疯狂上报。
+const maxAnnounceIntervalSeconds = 7 * 24 * 3600 // 7 天
 
 type Result struct {
 	NextEvent clientemu.Event
@@ -98,6 +105,10 @@ type Scheduler struct {
 	// stoppedSem 限制并发 stopped announce 数量；stoppedWG 用于停机时等待在途的异步 stopped announce
 	stoppedSem chan struct{}
 	stoppedWG  sync.WaitGroup
+	// stoppedMu 串行化 stoppedWG.Add 与 Stop 中设置 stoppedClosing，确保停机时
+	// 不再有新的 Add 与 Wait 并发，避免 WaitGroup Add/Wait 数据竞争导致漏等。
+	stoppedMu      sync.Mutex
+	stoppedClosing bool
 }
 
 type persistedTorrentState struct {
@@ -167,6 +178,10 @@ func (s *Scheduler) Start(ctx context.Context) {
 				case store.Removed:
 					s.stopTorrent(ctx, ev.Torrent.InfoHash, StopReasonRemoved)
 					// fillSlots 已在 stopTorrent 中调用，不需要重复
+				case store.Replaced:
+					// 同 infohash 替换：保留持久化上传与 completed 标记（见 rememberStopped），
+					// stopTorrent 内部会 fillSlots 重新添加使用新 announce 列表的种子。
+					s.stopTorrent(ctx, ev.Torrent.InfoHash, StopReasonReplaced)
 				}
 			}
 		}
@@ -195,6 +210,10 @@ func (s *Scheduler) Stop(ctx context.Context) {
 	for _, item := range list {
 		s.sendStoppedAsync(ctx, item.a, item.stats)
 	}
+	// 关闭 stopped announce 入口后再等待，保证 stoppedWG 的 Add 全部发生在 Wait 之前
+	s.stoppedMu.Lock()
+	s.stoppedClosing = true
+	s.stoppedMu.Unlock()
 	// 等待因种子移除而触发的在途异步 stopped announce，避免停机时漏发
 	stoppedDone := make(chan struct{})
 	go func() { s.stoppedWG.Wait(); close(stoppedDone) }()
@@ -350,14 +369,17 @@ func (s *Scheduler) stopTorrent(ctx context.Context, hash [20]byte, reason stopR
 	}
 
 	// 只在非分享率目标原因时清除 completed 标记
-	// 分享率达标的种子应保持 completed 状态，避免重新添加
-	if reason != StopReasonRatioTarget {
+	// 分享率达标的种子应保持 completed 状态，避免重新添加；
+	// 同 infohash 替换也保留 completed，避免达到目标后因换 passkey 又重新做种。
+	if reason != StopReasonRatioTarget && reason != StopReasonReplaced {
 		s.clearCompleted(hash)
 	}
 	s.rememberStopped(hash, stats.Uploaded, reason)
 
-	s.fillSlots(ctx)
+	// 先落盘再填充新种子：fillSlots 会异步启动新 announcer，
+	// 确保状态文件在下一个 started 上报前已写入，避免测试/观测时序竞态。
 	s.persistState()
+	s.fillSlots(ctx)
 }
 
 // sendStoppedAsync 在并发受限的 goroutine 中发送 stopped announce。
@@ -365,7 +387,13 @@ func (s *Scheduler) stopTorrent(ctx context.Context, hash [20]byte, reason stopR
 // 而根 ctx 在正常运行期间存活、停机时取消以中断在途请求。单次请求时长由 tracker
 // HTTP 客户端的 Timeout 兜底，无需额外 context 超时（避免配置为 0 时立即超时）。
 func (s *Scheduler) sendStoppedAsync(ctx context.Context, a *announcer, stats bandwidth.Stats) {
+	s.stoppedMu.Lock()
+	if s.stoppedClosing {
+		s.stoppedMu.Unlock()
+		return
+	}
 	s.stoppedWG.Add(1)
+	s.stoppedMu.Unlock()
 	go func() {
 		defer s.stoppedWG.Done()
 		select {
@@ -396,6 +424,19 @@ func (s *Scheduler) rememberStopped(hash [20]byte, uploaded int64, reason stopRe
 	if reason == StopReasonRemoved {
 		delete(s.persisted, hash)
 		delete(s.completed, hash)
+		return
+	}
+	if reason == StopReasonReplaced {
+		// 同 infohash 替换：保留持久化上传量与 completed 标记，仅更新累计上传。
+		// 后续 Added（fillSlots 重新添加）会通过 tryAdd 恢复这些状态。
+		if uploaded < 0 {
+			uploaded = 0
+		}
+		st := s.persisted[hash]
+		if uploaded > st.Uploaded {
+			st.Uploaded = uploaded
+		}
+		s.persisted[hash] = st
 		return
 	}
 	if uploaded < 0 {
@@ -471,17 +512,29 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 			if resp.MinInterval > intervalSeconds {
 				intervalSeconds = resp.MinInterval
 			}
+			if intervalSeconds > maxAnnounceIntervalSeconds {
+				intervalSeconds = maxAnnounceIntervalSeconds
+			}
 			if intervalSeconds > 0 {
 				interval = time.Duration(intervalSeconds) * time.Second
 				a.mu.Lock()
 				a.lastInterval = interval
 				a.mu.Unlock()
 			}
+			// 在持有 s.mu 时校验种子仍处于 active 并完成 bw 注册/更新，与
+			// stopTorrent/completeTorrent 的 removeActive + bw.Unregister 串行化，
+			// 避免并发取消时重建已被注销的 bw 条目，产生持续累计上传的孤儿条目。
+			s.mu.Lock()
+			if _, ok := s.active[a.torrent.InfoHash]; !ok {
+				s.mu.Unlock()
+				return
+			}
 			if event == clientemu.EventStarted {
 				a.markStarted()
 				s.bw.Register(a.torrent.InfoHashHex())
 			}
 			s.bw.UpdatePeers(a.torrent.InfoHashHex(), resp.Seeders, resp.Leechers)
+			s.mu.Unlock()
 			if ratioReached(cfg.Uploaded.RatioTarget, a.torrent.Size, s.bw.Get(a.torrent.InfoHashHex()).Uploaded) {
 				s.completeTorrent(ctx, a, cfg.Uploaded.RatioTarget)
 				return
@@ -641,7 +694,9 @@ func (s *Scheduler) persistStateLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			s.persistState()
+			// 停机时由 cmd/openpt 的 s.Stop 同步 persistState 完成最终落盘，
+			// 这里不再额外写入，避免后台 goroutine 在关闭期间写状态文件
+			// 与测试临时目录清理等并发场景产生竞态。
 			return
 		case <-ticker.C:
 			s.persistState()
@@ -695,9 +750,23 @@ func (s *Scheduler) persistState() {
 		warn(s.log, "failed to write state file", "path", s.stateFile, "error", err)
 		return
 	}
+	// 先 fsync 文件数据再 rename，避免掉电/强杀后 rename 已生效而数据未落盘，
+	// 重启时读到的状态文件为空或半截。
+	if f, err := os.OpenFile(tmp, os.O_RDWR, 0); err == nil {
+		if err := f.Sync(); err != nil {
+			warn(s.log, "failed to sync state file", "path", tmp, "error", err)
+		}
+		_ = f.Close()
+	}
 	if err := os.Rename(tmp, s.stateFile); err != nil {
 		_ = os.Remove(tmp)
 		warn(s.log, "failed to replace state file", "path", s.stateFile, "error", err)
+		return
+	}
+	// fsync 目录确保 rename 元数据持久化
+	if d, err := os.Open(filepath.Dir(s.stateFile)); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
 	}
 }
 

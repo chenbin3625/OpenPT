@@ -157,8 +157,9 @@ shutdown_stop_timeout_seconds = 20
 [uploaded]
 strategy = "configured_rate"
 configured_rate_bps = 170000
-min_rate_bps = 30000
-max_rate_bps = 170000
+# 不单独限制波动范围时置 0：由 random_jitter_percent 在 configured_rate_bps 周围生成
+min_rate_bps = 0
+max_rate_bps = 0
 conservative_rate_bps = 1024
 random_jitter_percent = 10
 random_refresh_seconds = 1200

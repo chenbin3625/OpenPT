@@ -69,6 +69,37 @@ func TestScanAndNotifyDetectsReplacedTorrent(t *testing.T) {
 	}
 }
 
+func TestScanAndNotifyEmitsReplacedForSameInfoHash(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	s := NewWithScanInterval(ctx, dir, "", 0, discardLogger())
+
+	path := filepath.Join(dir, "test.torrent")
+	writeTestTorrent(t, path, "http://tracker.example/announce", "same.bin", 100)
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	added := receiveEvent(t, s)
+	if added.Type != Added || added.Torrent.Name != "same.bin" {
+		t.Fatalf("event after add = %+v, want Added same.bin", added)
+	}
+
+	// 同 infohash（同名/同尺寸）但 announce 列表变化（如更新 passkey）：
+	// 应只发 Replaced，而非 Removed+Added，让调度器保留持久化上传状态。
+	writeTestTorrent(t, path, "http://tracker2.example/announce", "same.bin", 100)
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	ev := receiveEvent(t, s)
+	if ev.Type != Replaced || ev.Torrent.Name != "same.bin" {
+		t.Fatalf("event after same-hash replace = %+v, want Replaced same.bin", ev)
+	}
+	if len(ev.Torrent.AnnounceList) == 0 || ev.Torrent.AnnounceList[0] != "http://tracker2.example/announce" {
+		t.Fatalf("Replaced event announce list = %v, want new tracker URL", ev.Torrent.AnnounceList)
+	}
+}
+
 func TestInvalidReplacementKeepsOldTorrentAndDoesNotDeleteFile(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

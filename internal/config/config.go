@@ -196,9 +196,10 @@ func randomAnnouncePort() int {
 	span := randomAnnouncePortMax - randomAnnouncePortMin + 1
 	n, err := rand.Int(rand.Reader, big.NewInt(int64(span)))
 	if err != nil {
-		// 应急回退：混合时间戳和进程 ID 提升不可预测性
+		// 应急回退：混合时间戳和进程 ID 提升不可预测性。
+		// seed 可能为负，转 uint64 取模保证结果非负，避免端口低于随机端口下限。
 		seed := time.Now().UnixNano() ^ int64(os.Getpid())<<16
-		return randomAnnouncePortMin + int(seed%int64(span))
+		return randomAnnouncePortMin + int(uint64(seed)%uint64(span))
 	}
 	return randomAnnouncePortMin + int(n.Int64())
 }
@@ -283,8 +284,10 @@ func (c Config) Validate() error {
 			return fmt.Errorf("metrics.path %q conflicts with health check route", c.Metrics.Path)
 		}
 		if c.Metrics.WebUI {
+			// 与 internal/web.RegisterRoutes 实际注册的路由保持一致：
+			// v0.2.0 移除了 /styles.css、新增了 /assets/。
 			switch c.Metrics.Path {
-			case "/", "/styles.css", "/openpt-icon.svg", "/api/status", "/api/config", "/api/events":
+			case "/", "/assets/", "/openpt-icon.svg", "/api/status", "/api/config", "/api/events":
 				return fmt.Errorf("metrics.path %q conflicts with web UI routes", c.Metrics.Path)
 			}
 		}

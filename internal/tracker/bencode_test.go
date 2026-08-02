@@ -44,3 +44,16 @@ func TestParseRejectsDeeplyNested(t *testing.T) {
 		t.Fatal("expected error for deeply nested bencode, got nil")
 	}
 }
+
+func TestParseRejectsOverflowStringLength(t *testing.T) {
+	// 字符串长度前缀为 MaxInt64：start+n 会回绕为负数，必须返回错误而非切片越界 panic
+	overflow := "9223372036854775807:abc"
+	if _, err := ParseResponse([]byte(overflow)); err == nil {
+		t.Fatal("expected error for overflowing string length, got nil")
+	}
+
+	// 负数长度（digit 检查已拦截，仍应报错而非 panic）
+	if _, err := ParseResponse([]byte("-1:abc")); err == nil {
+		t.Fatal("expected error for negative string length, got nil")
+	}
+}

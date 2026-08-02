@@ -507,13 +507,20 @@ type digitHexAlgorithm struct {
 }
 
 func (a digitHexAlgorithm) Generate() string {
-	span := a.max - a.min
-	if span < 0 {
-		span = 0
+	if a.min >= a.max {
+		return strconv.FormatInt(a.min, 16)
 	}
-	// 防止 max - min + 1 溢出
-	n := randInt64(span+1) + a.min
-	return strconv.FormatInt(n, 16)
+	// 均匀随机 [min, max]。范围可能接近整个 int64 域（如 max=MaxInt64），
+	// int64 下 (max-min+1) 会溢出为负导致 randInt64 返回 0，生成恒定 key。
+	// 改用 big.Int 表示区间长度，无溢出风险。
+	span := new(big.Int).Sub(big.NewInt(a.max), big.NewInt(a.min))
+	span.Add(span, big.NewInt(1))
+	r, err := rand.Int(cryptoRandReader, span)
+	if err != nil {
+		panic(fmt.Sprintf("clientemu: crypto/rand failed for digitHexAlgorithm: %v", err))
+	}
+	n := new(big.Int).Add(big.NewInt(a.min), r)
+	return n.Text(16)
 }
 
 type randomPoolChecksumAlgorithm struct {

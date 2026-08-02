@@ -40,6 +40,9 @@ type EventType int
 const (
 	Added EventType = iota
 	Removed
+	// Replaced 表示同 infohash 的种子文件被替换（announce 列表变化，如更新 passkey）。
+	// infohash 未变，调度器应保留持久化的上传量与 completed 状态，仅重启 announcer。
+	Replaced
 )
 
 type Event struct {
@@ -144,7 +147,14 @@ func (s *Store) Start(ctx context.Context) error {
 				}
 				if torrent.IsTorrentPath(ev.Name) && (ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename)) {
 					s.cancelPendingLoad(ev.Name)
-					s.removeFile(ev.Name)
+					if _, err := os.Stat(ev.Name); err == nil {
+						// Remove/Rename 事件但文件仍存在：属于覆盖替换（如 mv 新文件到原路径），
+						// 交给 loadFile 区分同/不同 infohash。直接发 Removed 会清掉调度器的
+						// 持久化上传量，导致同 infohash 换 passkey 后上传归零。
+						s.scheduleLoad(ctx, ev.Name)
+					} else {
+						s.removeFile(ev.Name)
+					}
 				}
 			case err := <-w.Errors:
 				if err != nil {
@@ -241,6 +251,13 @@ func (s *Store) loadFile(path string) {
 	s.byPath[path] = t
 	s.mu.Unlock()
 	if old != nil && old.InfoHash == t.InfoHash && slices.Equal(old.AnnounceList, t.AnnounceList) {
+		return
+	}
+	if old != nil && old.InfoHash == t.InfoHash {
+		// 同 infohash 但 announce 列表变化：infohash 未变，持久化的上传量与
+		// completed 状态应保留；调度器据此重启 announcer 使用新的 tracker 地址。
+		s.log.Info("torrent replaced (announce list changed)", "path", path, "name", t.Name, "info_hash", t.InfoHashHex())
+		s.emit(Event{Type: Replaced, Torrent: t}, path)
 		return
 	}
 	if old != nil {
