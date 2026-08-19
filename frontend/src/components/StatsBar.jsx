@@ -59,8 +59,8 @@ export default function StatsBar({ stats, conn }) {
             label: '总上传量',
             value: formatBytes(stats.totalUploaded),
             icon: <CloudUploadOutlined />,
-            color: '#6366f1',
-            bg: 'rgba(99, 102, 241, 0.1)',
+            color: token.colorInfo,
+            bg: token.colorInfoBg,
         },
         {
             key: 'next',

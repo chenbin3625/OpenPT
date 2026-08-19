@@ -6,6 +6,10 @@ config.toml
 *.log
 tmp/
 dist/
+# Web UI 构建产物必须入库：go:embed 依赖 internal/web/dist 存在，
+# 否则全新 clone 后 go build / go test 会因缺少内嵌文件而失败。
+!internal/web/dist/
+!internal/web/dist/**
 node_modules/
 data/
 .env

@@ -168,6 +168,16 @@ func (c *Client) announceUDP(ctx context.Context, trackerURL *url.URL, rawQuery 
 		return Response{}, errors.New("UDP tracker URL has no host")
 	}
 
+	// 与 HTTP 路径（http.Client.Timeout）保持一致：整个 UDP 会话
+	// （connect + announce 两个请求）受 tracker.timeout_seconds 约束。
+	// 超时通过取消 ctx 关闭连接，让阻塞中的 Read/Write 立即返回，
+	// 避免 Read 只依赖并发 Select 无超时的盲等。
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
 	conn, err := (&net.Dialer{}).DialContext(ctx, "udp", trackerURL.Host)
 	if err != nil {
 		return Response{}, err
@@ -175,9 +185,6 @@ func (c *Client) announceUDP(ctx context.Context, trackerURL *url.URL, rawQuery 
 	defer conn.Close()
 	stopClose := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stopClose()
-	if timeout > 0 {
-		_ = conn.SetDeadline(time.Now().Add(timeout))
-	}
 
 	connectTx, err := randomUint32()
 	if err != nil {

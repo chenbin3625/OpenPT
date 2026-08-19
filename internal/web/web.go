@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
@@ -22,8 +22,11 @@ var distFS embed.FS
 var iconSVG []byte
 
 const (
-	// sseStatusPollInterval 是 SSE 端点检查状态是否变化并推送的间隔。
+	// sseStatusPollInterval 是 SSE 端点检查状态是否变化并推送的初始轮询间隔。
 	sseStatusPollInterval = 2 * time.Second
+	// maxSSEPollInterval 是 SSE 自适应退避的轮询间隔上限：数据持续无变化时
+	// 会指数退避到此值，降低空闲期间全量 Status() 遍历与 JSON 编码开销。
+	maxSSEPollInterval = 15 * time.Second
 	// defaultSSEHeartbeatInterval 是 SSE 心跳间隔。长时间无数据变化时，
 	// 中间代理 / 浏览器可能断开空闲连接，定期发送注释行保持连接活跃。
 	defaultSSEHeartbeatInterval = 15 * time.Second
@@ -51,7 +54,10 @@ type Handler struct {
 	store             *store.Store
 	scheduler         *scheduler.Scheduler
 	bw                *bandwidth.Dispatcher
+	log               *slog.Logger
 	heartbeatInterval time.Duration
+	basePoll          time.Duration
+	maxPoll           time.Duration
 	// shutdown 在服务停机时被关闭，SSE 处理器据此主动退出，
 	// 使 http.Server.Shutdown 不必等待长连接自然结束。nil 表示未注入（select 恒阻塞）。
 	shutdown <-chan struct{}
@@ -62,22 +68,29 @@ func (h *Handler) SetShutdownSignal(ch <-chan struct{}) {
 	h.shutdown = ch
 }
 
-// New creates a new web Handler.
-func New(st *store.Store, s *scheduler.Scheduler, bw *bandwidth.Dispatcher) *Handler {
+// New creates a new web Handler. log 为 nil 时使用 slog.Default()。
+func New(st *store.Store, s *scheduler.Scheduler, bw *bandwidth.Dispatcher, log *slog.Logger) *Handler {
+	if log == nil {
+		log = slog.Default()
+	}
 	return &Handler{
 		store:             st,
 		scheduler:         s,
 		bw:                bw,
+		log:               log,
 		heartbeatInterval: defaultSSEHeartbeatInterval,
+		basePoll:          sseStatusPollInterval,
+		maxPoll:           maxSSEPollInterval,
 	}
 }
 
 // RegisterRoutes registers the web UI routes on the given mux.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+// 注意：这里注册的路由需与 config.ReservedWebUIRoutes 保持同步（单源清单）。
+func (h *Handler) RegisterRoutes(mux *http.ServeMux) error {
 	assets, err := fs.Sub(distFS, "dist")
 	if err != nil {
-		// go:embed 保证 dist 存在，此处仅防御
-		panic("web: embedded dist missing: " + err.Error())
+		// go:embed 保证 dist 存在；此处仅防御，但以错误返回而非 panic。
+		return fmt.Errorf("web: embedded dist unavailable: %w", err)
 	}
 	mux.Handle("/assets/", http.FileServer(http.FS(assets)))
 	mux.HandleFunc("/", h.handleIndex(assets))
@@ -85,6 +98,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/status", h.handleStatus)
 	mux.HandleFunc("/api/config", h.handleConfig)
 	mux.HandleFunc("/api/events", h.handleEvents)
+	return nil
 }
 
 // handleIndex 返回一个处理函数，仅当路径为 / 时返回内嵌的 index.html，
@@ -118,7 +132,7 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Torrents: h.scheduler.Status(),
 	}
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("web: failed to encode status response: %v", err)
+		h.log.Warn("web: failed to encode status response", "error", err)
 	}
 }
 
@@ -170,7 +184,7 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewEncoder(w).Encode(ConfigResponse{Items: items}); err != nil {
-		log.Printf("web: failed to encode config response: %v", err)
+		h.log.Warn("web: failed to encode config response", "error", err)
 	}
 }
 
@@ -241,17 +255,21 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	ticker := time.NewTicker(sseStatusPollInterval)
-	defer ticker.Stop()
 	heartbeat := time.NewTicker(h.heartbeatInterval)
 	defer heartbeat.Stop()
 
 	var lastHash uint64
 
 	// Send initial status
-	if !h.sendStatusIfChanged(w, flusher, &lastHash) {
+	if _, ok := h.sendStatusIfChanged(w, flusher, &lastHash); !ok {
 		return
 	}
+
+	// 自适应轮询：数据无变化时把轮询间隔向 maxPoll 退避，数据变化时恢复初始值。
+	// 活跃做种期间 uploaded 每秒变化，间隔维持在初始档；空闲/无种子时降低开销。
+	poll := h.basePoll
+	pollTimer := time.NewTimer(poll)
+	defer pollTimer.Stop()
 
 	for {
 		select {
@@ -259,10 +277,17 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-h.shutdown: // nil channel 恒阻塞，未注入时不影响正常流程
 			return
-		case <-ticker.C:
-			if !h.sendStatusIfChanged(w, flusher, &lastHash) {
+		case <-pollTimer.C:
+			changed, ok := h.sendStatusIfChanged(w, flusher, &lastHash)
+			if !ok {
 				return
 			}
+			if changed {
+				poll = h.basePoll
+			} else if poll < h.maxPoll {
+				poll = min(poll*3/2, h.maxPoll)
+			}
+			pollTimer.Reset(poll)
 		case <-heartbeat.C:
 			// SSE 注释行（以冒号开头），客户端 EventSource 会忽略，仅用于保持连接活跃
 			if _, err := fmt.Fprintf(w, ": keep-alive\n\n"); err != nil {
@@ -273,25 +298,27 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) sendStatusIfChanged(w http.ResponseWriter, flusher http.Flusher, lastHash *uint64) bool {
+// sendStatusIfChanged 计算当前状态并仅在变化时推送一行 data。
+// 返回 (changed, ok)：changed 表示本次是否有数据变化；ok=false 表示写入连接失败，调用方应结束。
+func (h *Handler) sendStatusIfChanged(w http.ResponseWriter, flusher http.Flusher, lastHash *uint64) (bool, bool) {
 	resp := StatusResponse{
 		Torrents: h.scheduler.Status(),
 	}
 	data, err := json.Marshal(resp)
 	if err != nil {
-		return true
+		return false, true
 	}
 	// 仅数据变更时才推送
 	hash := hashBytes(data)
 	if hash == *lastHash {
-		return true
+		return false, true
 	}
 	*lastHash = hash
 	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
-		return false
+		return true, false
 	}
 	flusher.Flush()
-	return true
+	return true, true
 }
 
 // hashBytes computes a simple FNV-1a hash for change detection.

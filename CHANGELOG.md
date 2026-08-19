@@ -2,6 +2,27 @@
 
 本项目以 Git tag 发布版本。每次发布都会在 GitHub Release 中附上对应说明。
 
+## v0.2.3 - 2026-08-20
+
+### 健壮性与正确性
+- **BTv2 信息哈希**：改用 anacrolix 参考实现计算 v2-only 种子的 20 字节 trackable infohash（原始 info 字典字节的 SHA-256 截断），避免算法细节与生态实现漂移；补充 hybrid 种子走 v1 哈希的测试
+- **带宽数值溢出防御**：对上传速率/波动区间上限做钳制（1 TiB/s），消除极端配置下 `Int63n` 溢出引发的 panic；新增超大速率配置测试
+- **UDP Tracker 超时统一**：UDP 会话（connect + announce）改为与 HTTP 路径一致的 timeout 约束（`tracker.timeout_seconds`），避免无响应时无限阻塞；新增代理拒绝与超时测试
+- **HTTP 服务加固**：监控服务增加 `ReadTimeout`，并明确 `WriteTimeout` 因 SSE 长连接而刻意不设置
+- **静态分析清零**：删除未使用函数与死赋值（staticcheck 0 告警）；热路径正则提升为包级变量，避免每次上报重复编译
+
+### 体验与一致性
+- **状态语义**：种子在收到首次 Tracker 响应前不再被误标为“无 peers 异常”（新增 `has_response` 状态）
+- **SSE 自适应轮询**：数据无变化时轮询间隔向 15s 退避，空闲时显著降低全量状态遍历开销
+- **日志统一**：web 层改用 slog（此前混用标准库 log）
+- **路由清单单源化**：`metrics.path` 冲突校验复用 `config.ReservedWebUIRoutes()`，避免与 Web 路由注册清单漂移
+- **前端**：配置抽屉增加加载失败提示；总上传量配色改走主题 token；字节格式化对负数/NaN 归零；前端版本与项目对齐
+
+### 工程与发布
+- **前端产物入库**：`internal/web/dist` 纳入版本控制，全新 clone 后可直接 `go build`/`go test`（原需先手动构建前端）
+- **开源许可**：新增 MIT LICENSE 并在 README 标注
+- **审查闭环**：新增 `CODE_REVIEW.md`（全量代码审查与修复状态总览）
+
 ## v0.2.2 - 2026-08-20
 
 ### 修复

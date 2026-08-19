@@ -164,6 +164,56 @@ func TestParseUDPQueryPreservesPlus(t *testing.T) {
 	}
 }
 
+// TestAnnounceUDPRejectedWhenProxyConfigured 验证配置 tracker.proxy 后 UDP announce
+// 立即返回明确错误而不发起网络请求，调度器据此切换到其它 tracker。
+func TestAnnounceUDPRejectedWhenProxyConfigured(t *testing.T) {
+	c, err := New(Options{
+		Timeout:             time.Second,
+		Proxy:               "http://127.0.0.1:7890",
+		ReuseConnections:    true,
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Announce(context.Background(), "udp://127.0.0.1:9/announce", "info_hash=abc", nil)
+	if err == nil || !strings.Contains(err.Error(), "unavailable when tracker.proxy is configured") {
+		t.Fatalf("announce error = %v, want proxy rejection", err)
+	}
+}
+
+// TestAnnounceUDPTimesOut 验证无响应的 UDP tracker 会话受 timeout 约束而结束，
+// 与 HTTP 路径的 http.Client.Timeout 语义一致（而非无限阻塞）。
+func TestAnnounceUDPTimesOut(t *testing.T) {
+	// 绑定一个从不响应的 UDP socket，模拟 tracker 失效。
+	listener, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	c, err := New(Options{
+		Timeout:             200 * time.Millisecond,
+		ReuseConnections:    true,
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	_, err = c.Announce(context.Background(), "udp://"+listener.LocalAddr().String()+"/announce", "info_hash=abc", nil)
+	if err == nil {
+		t.Fatal("expected UDP announce to time out, got success")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("UDP time out took %v, want bounded by tracker timeout", elapsed)
+	}
+}
+
 func newTestTrackerClient(t *testing.T) *Client {
 	t.Helper()
 	c, err := New(Options{

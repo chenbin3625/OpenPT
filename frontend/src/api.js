@@ -25,6 +25,9 @@ export function useTorrentFeed() {
 
 export async function fetchConfig() {
     const res = await fetch('/api/config');
+    if (!res.ok) {
+        throw new Error(`配置接口返回 ${res.status}`);
+    }
     const json = await res.json();
     return json.items || [];
 }

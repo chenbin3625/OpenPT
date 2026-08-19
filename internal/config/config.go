@@ -185,6 +185,12 @@ func (c *Config) applyDefaults(configPath string) {
 	}
 }
 
+// ReservedWebUIRoutes 是 Web UI 已注册的字面路径，metrics.path 不得与其中任何
+// 一条冲突。internal/web.RegisterRoutes 应保持与该清单一致（单源路由清单）。
+func ReservedWebUIRoutes() []string {
+	return []string{"/", "/assets/", "/openpt-icon.svg", "/api/status", "/api/config", "/api/events"}
+}
+
 func resolveConfigPath(root, path string) string {
 	if path == "" || filepath.IsAbs(path) {
 		return path
@@ -193,15 +199,15 @@ func resolveConfigPath(root, path string) string {
 }
 
 func randomAnnouncePort() int {
-	span := randomAnnouncePortMax - randomAnnouncePortMin + 1
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(span)))
+	span := uint64(randomAnnouncePortMax - randomAnnouncePortMin + 1)
+	n, err := rand.Int(rand.Reader, new(big.Int).SetUint64(span))
 	if err != nil {
-		// 应急回退：混合时间戳和进程 ID 提升不可预测性。
-		// seed 可能为负，转 uint64 取模保证结果非负，避免端口低于随机端口下限。
-		seed := time.Now().UnixNano() ^ int64(os.Getpid())<<16
-		return randomAnnouncePortMin + int(uint64(seed)%uint64(span))
+		// crypto/rand 失败时的应急回退（正常不会触发）：
+		// 用 UnixNano 与进程 ID 混合后取模，保证结果落在 [min, min+span-1]。
+		seed := uint64(time.Now().UnixNano() ^ int64(os.Getpid()))
+		return randomAnnouncePortMin + int(seed%span)
 	}
-	return randomAnnouncePortMin + int(n.Int64())
+	return randomAnnouncePortMin + int(n.Uint64())
 }
 
 func (c Config) Validate() error {
@@ -284,11 +290,12 @@ func (c Config) Validate() error {
 			return fmt.Errorf("metrics.path %q conflicts with health check route", c.Metrics.Path)
 		}
 		if c.Metrics.WebUI {
-			// 与 internal/web.RegisterRoutes 实际注册的路由保持一致：
-			// v0.2.0 移除了 /styles.css、新增了 /assets/。
-			switch c.Metrics.Path {
-			case "/", "/assets/", "/openpt-icon.svg", "/api/status", "/api/config", "/api/events":
-				return fmt.Errorf("metrics.path %q conflicts with web UI routes", c.Metrics.Path)
+			// 与 internal/web.RegisterRoutes 实际注册的路由保持一致；
+			// 路由清单见 ReservedWebUIRoutes。
+			for _, route := range ReservedWebUIRoutes() {
+				if c.Metrics.Path == route {
+					return fmt.Errorf("metrics.path %q conflicts with web UI routes", c.Metrics.Path)
+				}
 			}
 		}
 	}

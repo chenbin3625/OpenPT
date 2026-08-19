@@ -1,6 +1,7 @@
 export const formatBytes = n => {
     n = Number(n || 0);
-    if (n === 0) return '0 B';
+    // 负数或 NaN 一律按 0 处理，避免输出 "-0.00 B" 或异常单位
+    if (!(n > 0)) return '0 B';
     const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
     let i = Math.floor(Math.log(n) / Math.log(1024));
     if (!Number.isFinite(i) || i < 0) i = 0;
@@ -10,7 +11,7 @@ export const formatBytes = n => {
 
 export const formatBytesParts = n => {
     n = Number(n || 0);
-    if (n === 0) return { value: '0', unit: 'B' };
+    if (!(n > 0)) return { value: '0', unit: 'B' };
     const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
     let i = Math.floor(Math.log(n) / Math.log(1024));
     if (!Number.isFinite(i) || i < 0) i = 0;

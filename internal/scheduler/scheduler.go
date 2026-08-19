@@ -74,6 +74,9 @@ type TorrentStatus struct {
 	LastIntervalSec int64   `json:"last_interval_seconds"`
 	RetryInSec      int64   `json:"retry_in_seconds"`
 	NextEvent       string  `json:"next_event"`
+	// HasResponse 表示是否已收到过至少一次成功的 tracker 响应。
+	// 尚未首次上报成功的种子不应被标记为“无 peers”等异常（详见 Status）。
+	HasResponse bool `json:"has_response"`
 }
 
 func NextAfter(event clientemu.Event, interval time.Duration, err error) Result {
@@ -505,7 +508,6 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 			a.failures = 0
 			a.lastError = ""
 			a.lastAnnounce = now
-			interval := a.lastInterval
 			a.mu.Unlock()
 			// 遵守 tracker 的 min interval：取 interval 与 min interval 的较大值，
 			// 避免过于频繁上报被站点 ban。
@@ -517,7 +519,7 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 				intervalSeconds = maxAnnounceIntervalSeconds
 			}
 			if intervalSeconds > 0 {
-				interval = time.Duration(intervalSeconds) * time.Second
+				interval := time.Duration(intervalSeconds) * time.Second
 				a.mu.Lock()
 				a.lastInterval = interval
 				a.mu.Unlock()
@@ -890,6 +892,7 @@ func (s *Scheduler) Status() []TorrentStatus {
 		nextAnnounce := time.Time{}
 		nextEvent := clientemu.EventNone
 		lastInterval := time.Duration(0)
+		hasResponse := false
 		if len(a.torrent.AnnounceList) > 0 {
 			a.mu.Lock()
 			trackerIndex = a.trackerIndex % len(a.torrent.AnnounceList)
@@ -900,6 +903,7 @@ func (s *Scheduler) Status() []TorrentStatus {
 			nextAnnounce = a.nextAnnounce
 			nextEvent = a.nextEvent
 			lastInterval = a.lastInterval
+			hasResponse = a.started
 			a.mu.Unlock()
 		}
 
@@ -914,11 +918,15 @@ func (s *Scheduler) Status() []TorrentStatus {
 				issueReasons = append(issueReasons, fmt.Sprintf("连续失败 %d 次", failures))
 			}
 		}
-		if stats.Seeders == 0 && stats.Leechers == 0 {
-			hasIssue = true
-			issueReasons = append(issueReasons, "无 peers 连接")
-		} else if stats.Leechers == 0 {
-			issueReasons = append(issueReasons, "无下载者")
+		// 仅在已收到过 tracker 响应后才把“无 peers / 无下载者”当作问题，
+		// 避免新调度但尚未完成首次上报的种子被误标为异常。
+		if hasResponse {
+			if stats.Seeders == 0 && stats.Leechers == 0 {
+				hasIssue = true
+				issueReasons = append(issueReasons, "无 peers 连接")
+			} else if stats.Leechers == 0 {
+				issueReasons = append(issueReasons, "无下载者")
+			}
 		}
 		issueReason := ""
 		if len(issueReasons) > 0 {
@@ -946,6 +954,7 @@ func (s *Scheduler) Status() []TorrentStatus {
 			LastIntervalSec: int64(lastInterval.Seconds()),
 			RetryInSec:      secondsUntil(nextAnnounce),
 			NextEvent:       eventName(nextEvent),
+			HasResponse:     hasResponse,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

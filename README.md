@@ -119,8 +119,17 @@ docker compose restart
 
 ## 从源码构建
 
-Web UI 使用 Vite + React + antd 构建，产物通过 `go:embed` 内嵌进二进制，
-因此 **`go build` / `go test` 前必须先构建前端**：
+Web UI 使用 Vite + React + antd 构建，产物通过 `go:embed` 内嵌进二进制。
+
+**内嵌前端产物（`internal/web/dist/`）已随仓库入库**，因此全新 clone 后可直接
+`go build` / `go test`，无需先手动构建前端：
+
+```sh
+go build -o openpt ./cmd/openpt
+```
+
+只有修改了 `frontend/src/**` 后，才需要重新构建前端产物（输出到 `internal/web/dist`，
+并随改动一起提交，保持与源码同步）：
 
 ```sh
 # 1. 构建前端（输出到 internal/web/dist）
@@ -349,3 +358,7 @@ kill -HUP $(pidof openpt)
 - 默认 `announce.port = 0` 会在启动时随机端口；如需固定端口再手动设置具体值。
 - 建议从较保守的上传策略开始，确认站点表现正常后再调整速率。
 - 支持 HTTP、HTTPS 和 UDP Tracker；配置代理时 UDP Tracker 会明确报错并切换到其它 Tracker。
+
+## 许可证
+
+本项目以 [MIT License](LICENSE) 发布。

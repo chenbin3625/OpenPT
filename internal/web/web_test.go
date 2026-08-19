@@ -31,7 +31,7 @@ func TestHandleConfigUsesCurrentSchedulerConfig(t *testing.T) {
 		Logging:                    config.LoggingConfig{File: ""},
 	}
 	s := scheduler.New(initial, nil, nil, nil, nil, nil)
-	h := New(nil, s, nil)
+	h := New(nil, s, nil, nil)
 
 	next := initial
 	next.ArchiveDir = "/new/archive"
@@ -84,9 +84,11 @@ func TestHandleConfigUsesCurrentSchedulerConfig(t *testing.T) {
 }
 
 func TestIndexServesBuiltApp(t *testing.T) {
-	h := New(nil, nil, nil)
+	h := New(nil, nil, nil, nil)
 	mux := http.NewServeMux()
-	h.RegisterRoutes(mux)
+	if err := h.RegisterRoutes(mux); err != nil {
+		t.Fatal(err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -107,9 +109,11 @@ func TestIndexServesBuiltApp(t *testing.T) {
 // TestAssetIsServed 验证内嵌的构建产物（如 JS/CSS）能通过 /assets/ 正常访问，
 // 确保 go:embed all:dist 与静态文件路由工作正常。
 func TestAssetIsServed(t *testing.T) {
-	h := New(nil, nil, nil)
+	h := New(nil, nil, nil, nil)
 	mux := http.NewServeMux()
-	h.RegisterRoutes(mux)
+	if err := h.RegisterRoutes(mux); err != nil {
+		t.Fatal(err)
+	}
 
 	indexReq := httptest.NewRequest(http.MethodGet, "/", nil)
 	indexRec := httptest.NewRecorder()
@@ -135,9 +139,11 @@ func TestAssetIsServed(t *testing.T) {
 }
 
 func TestIconIsServed(t *testing.T) {
-	h := New(nil, nil, nil)
+	h := New(nil, nil, nil, nil)
 	mux := http.NewServeMux()
-	h.RegisterRoutes(mux)
+	if err := h.RegisterRoutes(mux); err != nil {
+		t.Fatal(err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/openpt-icon.svg", nil)
 	rec := httptest.NewRecorder()
@@ -159,11 +165,13 @@ func TestSSEEmitsHeartbeat(t *testing.T) {
 		Uploaded: config.UploadedConfig{Strategy: "none"},
 		Metrics:  config.MetricsConfig{Enabled: true, WebUI: true},
 	}, nil, nil, nil, nil, nil)
-	h := New(nil, s, nil)
+	h := New(nil, s, nil, nil)
 	h.heartbeatInterval = 30 * time.Millisecond
 
 	mux := http.NewServeMux()
-	h.RegisterRoutes(mux)
+	if err := h.RegisterRoutes(mux); err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
