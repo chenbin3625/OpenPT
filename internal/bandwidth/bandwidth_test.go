@@ -113,6 +113,50 @@ func TestPeersWeightWithZeroPeers(t *testing.T) {
 	}
 }
 
+func TestPeersWeightWithZeroLeechers(t *testing.T) {
+	// 验证 seeders > 0, leechers = 0 时权重必须为 0（严防 PT 封号）
+	weight := peersWeight(50, 0)
+	if weight != 0.0 {
+		t.Fatalf("peersWeight(50, 0) = %f, want 0.0", weight)
+	}
+
+	d := New(Config{
+		Strategy:          "configured_rate",
+		ConfiguredRateBps: 1000,
+		MinRateBps:        1000,
+		MaxRateBps:        1000,
+	})
+	d.Register("no-leechers")
+	d.UpdatePeers("no-leechers", 50, 0)
+	forceElapsed(d, time.Second)
+	d.tick()
+
+	st := d.Get("no-leechers")
+	if st.CurrentSpeedBps != 0 || st.Uploaded != 0 {
+		t.Fatalf("torrent with 0 leechers got speed %d, uploaded %d, want 0", st.CurrentSpeedBps, st.Uploaded)
+	}
+}
+
+func TestDispatcherAccumulatesFractionalBytes(t *testing.T) {
+	// 50 Bps, 100ms ticks: 0.1s * 50 = 5 bytes
+	d := New(Config{
+		Strategy:          "configured_rate",
+		ConfiguredRateBps: 1, // 1 Bps
+		MinRateBps:        1,
+		MaxRateBps:        1,
+	})
+	d.Register("slow")
+	// 每次 0.4s (0.4 byte)，3 次 tick 应该累加 1 byte 而不是 0
+	for i := 0; i < 3; i++ {
+		forceElapsed(d, 400*time.Millisecond)
+		d.tick()
+	}
+	st := d.Get("slow")
+	if st.Uploaded != 1 {
+		t.Fatalf("uploaded = %d, want 1 byte accumulated from fractional ticks", st.Uploaded)
+	}
+}
+
 func TestDispatcherAccumulatesUploadedByElapsedTime(t *testing.T) {
 	d := New(Config{
 		Strategy:          "configured_rate",

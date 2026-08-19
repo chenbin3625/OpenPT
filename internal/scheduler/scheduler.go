@@ -95,12 +95,13 @@ type Scheduler struct {
 	store   *store.Store
 	log     *slog.Logger
 
-	mu        sync.Mutex
-	active    map[[20]byte]*announcer
-	completed map[[20]byte]bool // 已完成的种子，不再重新添加
-	persisted map[[20]byte]persistedTorrentState
-	stateMu   sync.Mutex
-	stateFile string
+	mu         sync.Mutex
+	active     map[[20]byte]*announcer
+	completed  map[[20]byte]bool // 已完成的种子，不再重新添加
+	persisted  map[[20]byte]persistedTorrentState
+	stateMu    sync.Mutex
+	stateFile  string
+	stateDirty chan struct{}
 
 	// stoppedSem 限制并发 stopped announce 数量；stoppedWG 用于停机时等待在途的异步 stopped announce
 	stoppedSem chan struct{}
@@ -155,6 +156,7 @@ func New(cfg config.Config, emu *clientemu.Client, tc *tracker.Client, bw *bandw
 		completed:  completed,
 		persisted:  persisted,
 		stateFile:  cfg.StateFile,
+		stateDirty: make(chan struct{}, 1),
 		stoppedSem: make(chan struct{}, maxConcurrentStopped),
 	}
 }
@@ -376,9 +378,8 @@ func (s *Scheduler) stopTorrent(ctx context.Context, hash [20]byte, reason stopR
 	}
 	s.rememberStopped(hash, stats.Uploaded, reason)
 
-	// 先落盘再填充新种子：fillSlots 会异步启动新 announcer，
-	// 确保状态文件在下一个 started 上报前已写入，避免测试/观测时序竞态。
-	s.persistState()
+	// 触发异步/防抖落盘，避免批量删除时频繁同步 fsync 阻塞事件循环
+	s.requestPersist()
 	s.fillSlots(ctx)
 }
 
@@ -600,13 +601,19 @@ func (s *Scheduler) announceWithStats(ctx context.Context, a *announcer, event c
 		return tracker.Response{}, err
 	}
 	a.mu.Lock()
+	if len(a.torrent.AnnounceList) == 0 {
+		a.mu.Unlock()
+		return tracker.Response{}, fmt.Errorf("no trackers available for torrent %s", a.torrent.Name)
+	}
 	base := a.torrent.AnnounceList[a.trackerIndex%len(a.torrent.AnnounceList)]
 	a.mu.Unlock()
 	s.log.Info("announce", "event", eventName(event), "host", trackerHost(base), "name", a.torrent.Name, "info_hash", a.torrent.InfoHashHex())
 	resp, err := s.tracker.Announce(ctx, base, query, s.client.HeadersForRequest())
 	if err != nil {
 		a.mu.Lock()
-		a.trackerIndex = (a.trackerIndex + 1) % len(a.torrent.AnnounceList)
+		if len(a.torrent.AnnounceList) > 0 {
+			a.trackerIndex = (a.trackerIndex + 1) % len(a.torrent.AnnounceList)
+		}
 		a.mu.Unlock()
 		return tracker.Response{}, err
 	}
@@ -648,7 +655,7 @@ func (s *Scheduler) completeTorrent(ctx context.Context, a *announcer, ratioTarg
 		s.sendStoppedAsync(stopCtx, a, stats)
 	}
 	s.fillSlots(stopCtx)
-	s.persistState()
+	s.requestPersist()
 }
 
 func loadPersistedState(path string, log *slog.Logger) (map[[20]byte]persistedTorrentState, map[[20]byte]bool) {
@@ -688,6 +695,16 @@ func loadPersistedState(path string, log *slog.Logger) (map[[20]byte]persistedTo
 	return persisted, completed
 }
 
+func (s *Scheduler) requestPersist() {
+	if s.stateFile == "" {
+		return
+	}
+	select {
+	case s.stateDirty <- struct{}{}:
+	default:
+	}
+}
+
 func (s *Scheduler) persistStateLoop(ctx context.Context) {
 	ticker := time.NewTicker(statePersistInterval)
 	defer ticker.Stop()
@@ -699,6 +716,19 @@ func (s *Scheduler) persistStateLoop(ctx context.Context) {
 			// 与测试临时目录清理等并发场景产生竞态。
 			return
 		case <-ticker.C:
+			s.persistState()
+		case <-s.stateDirty:
+			// 防抖：等待 100ms 吸收同批次的其它变更，避免批量操作时高频 fsync 阻塞
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(100 * time.Millisecond):
+			}
+			// 清理防抖窗口内可能积攒的额外 trigger
+			select {
+			case <-s.stateDirty:
+			default:
+			}
 			s.persistState()
 		}
 	}
