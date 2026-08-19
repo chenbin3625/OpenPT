@@ -146,6 +146,24 @@ func TestAnnounceAppendsQueryBeforeFragment(t *testing.T) {
 	}
 }
 
+func TestParseUDPQueryPreservesPlus(t *testing.T) {
+	raw := "info_hash=%00%01%2B%20abc&peer_id=-AA0000-123+456%2B789&port=6881"
+	vals, err := parseUDPQuery(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// %2B -> '+', %20 -> ' ', and '+' remains '+'
+	if vals["info_hash"] != "\x00\x01+ abc" {
+		t.Fatalf("info_hash = %q, want %q", vals["info_hash"], "\x00\x01+ abc")
+	}
+	if vals["peer_id"] != "-AA0000-123+456+789" {
+		t.Fatalf("peer_id = %q, want %q", vals["peer_id"], "-AA0000-123+456+789")
+	}
+	if vals["port"] != "6881" {
+		t.Fatalf("port = %q, want 6881", vals["port"])
+	}
+}
+
 func newTestTrackerClient(t *testing.T) *Client {
 	t.Helper()
 	c, err := New(Options{

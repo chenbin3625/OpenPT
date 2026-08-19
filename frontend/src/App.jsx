@@ -1,15 +1,20 @@
 import { useMemo, useState } from 'react';
-import { Flex, Typography } from 'antd';
+import { Flex, Button, Tooltip, Space } from 'antd';
+import {
+    SunOutlined,
+    MoonOutlined,
+    SettingOutlined,
+} from '@ant-design/icons';
 import StatsBar from './components/StatsBar';
 import TorrentTable from './components/TorrentTable';
 import ConfigDrawer from './components/ConfigDrawer';
 import { useTorrentFeed } from './api';
-
-const { Text } = Typography;
+import { useAppTheme } from './ThemeContext';
 
 export default function App() {
     const { torrents, conn } = useTorrentFeed();
     const [configOpen, setConfigOpen] = useState(false);
+    const { isDark, toggleMode } = useAppTheme();
 
     const stats = useMemo(() => {
         let issues = 0;
@@ -30,11 +35,39 @@ export default function App() {
         <div className="app">
             <header className="app-header">
                 <div className="app-header-inner">
-                    <Flex align="center" gap={9} style={{ flex: '0 0 auto' }}>
-                        <img src="/openpt-icon.svg" width="26" height="26" alt="" style={{ borderRadius: 6 }} />
-                        <Text strong style={{ fontSize: 15, whiteSpace: 'nowrap' }}>OpenPT 监控面板</Text>
-                    </Flex>
+                    <div className="brand-logo-container">
+                        <img
+                            src="/openpt-icon.svg"
+                            width="28"
+                            height="28"
+                            alt="OpenPT Logo"
+                            className="brand-icon"
+                        />
+                        <span className="brand-title">OpenPT</span>
+                    </div>
+
                     <StatsBar stats={stats} conn={conn} />
+
+                    <Space size={8} style={{ flex: '0 0 auto' }}>
+                        <Tooltip title={isDark ? '切换为亮色模式' : '切换为暗色模式'}>
+                            <Button
+                                type="text"
+                                icon={isDark ? <SunOutlined /> : <MoonOutlined />}
+                                onClick={toggleMode}
+                                aria-label="切换主题"
+                                style={{ borderRadius: 8 }}
+                            />
+                        </Tooltip>
+                        <Tooltip title="系统配置">
+                            <Button
+                                type="text"
+                                icon={<SettingOutlined />}
+                                onClick={() => setConfigOpen(true)}
+                                aria-label="查看配置"
+                                style={{ borderRadius: 8 }}
+                            />
+                        </Tooltip>
+                    </Space>
                 </div>
             </header>
             <main className="main-container">

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	execpkg "os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -38,6 +39,10 @@ func main() {
 	}
 	if os.Geteuid() == 0 {
 		chownCreatedPaths(createdPaths, runUID, runGID)
+		if err := syscall.Setgroups([]int{}); err != nil {
+			fmt.Fprintf(os.Stderr, "openpt-entrypoint: setgroups: %v\n", err)
+			os.Exit(1)
+		}
 		if err := syscall.Setgid(runGID); err != nil {
 			fmt.Fprintf(os.Stderr, "openpt-entrypoint: setgid: %v\n", err)
 			os.Exit(1)
@@ -181,18 +186,4 @@ func exec(args []string) error {
 	return syscall.Exec(path, args, os.Environ())
 }
 
-var execLookPath = func(file string) (string, error) {
-	if strings.Contains(file, "/") {
-		return file, nil
-	}
-	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
-		if dir == "" {
-			dir = "."
-		}
-		path := filepath.Join(dir, file)
-		if info, err := os.Stat(path); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-			return path, nil
-		}
-	}
-	return "", fmt.Errorf("%s not found in PATH", file)
-}
+var execLookPath = execpkg.LookPath

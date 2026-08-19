@@ -52,8 +52,8 @@ func (e URLEncoder) EncodeString(s string) string {
 }
 
 func (e URLEncoder) encodeByte(ch byte) string {
-	if e.pattern != nil && e.pattern.MatchString(string(rune(ch))) {
-		return string(rune(ch))
+	if e.pattern != nil && e.pattern.MatchString(string([]byte{ch})) {
+		return string([]byte{ch})
 	}
 	hex := fmt.Sprintf("%%%02x", ch)
 	if strings.EqualFold(e.EncodedHexCase, "upper") {

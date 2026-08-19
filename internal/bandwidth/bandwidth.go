@@ -13,6 +13,7 @@ type Stats struct {
 	CurrentSpeedBps int64
 	Seeders         int
 	Leechers        int
+	fractionalBytes float64
 }
 
 // maxTickElapsed 限制单次 tick 累计上传量的时间上限。
@@ -222,7 +223,10 @@ func (d *Dispatcher) tick() {
 		return
 	}
 	for _, st := range d.stats {
-		st.Uploaded += int64(float64(st.CurrentSpeedBps) * elapsed.Seconds())
+		delta := float64(st.CurrentSpeedBps)*elapsed.Seconds() + st.fractionalBytes
+		bytesToAdd := int64(delta)
+		st.Uploaded += bytesToAdd
+		st.fractionalBytes = delta - float64(bytesToAdd)
 	}
 }
 
@@ -312,15 +316,15 @@ func peersWeight(seeders, leechers int) float64 {
 	if seeders <= 0 && leechers <= 0 {
 		return 0.1 // 无 peers 信息时使用较小权重，待实际数据到达后调整
 	}
+	if leechers <= 0 {
+		return 0.0 // 有做种者但无下载者，严禁分配上传量以防反作弊检测
+	}
 
 	// 使用局部变量，避免修改输入参数
 	s := seeders
 	l := leechers
 	if s <= 0 {
 		s = 1
-	}
-	if l <= 0 {
-		l = 1
 	}
 
 	total := s + l

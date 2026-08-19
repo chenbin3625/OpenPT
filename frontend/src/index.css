@@ -1,56 +1,241 @@
 :root {
     --page-width: 1680px;
+    --bg-page: #f8fafc;
+    --bg-header: rgba(255, 255, 255, 0.85);
+    --border-subtle: rgba(226, 232, 240, 0.8);
+    --card-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+    --card-shadow-hover: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+    --issue-bg: #fff1f2;
+    --issue-bg-hover: #ffe4e6;
+    --issue-border: #fecdd3;
+    --pulse-color: #10b981;
+}
+
+[data-theme="dark"] {
+    --bg-page: #0b1120;
+    --bg-header: rgba(15, 23, 42, 0.88);
+    --border-subtle: rgba(51, 65, 85, 0.7);
+    --card-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.35);
+    --card-shadow-hover: 0 4px 12px 0 rgba(0, 0, 0, 0.45);
+    --issue-bg: rgba(225, 29, 72, 0.12);
+    --issue-bg-hover: rgba(225, 29, 72, 0.2);
+    --issue-border: rgba(225, 29, 72, 0.3);
+    --pulse-color: #34d399;
+}
+
+* {
+    box-sizing: border-box;
 }
 
 body {
     margin: 0;
-    background: #f6f7f9;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg-page);
+    color-scheme: light dark;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.25s ease;
 }
 
-/* 顶部吸顶条：品牌 + 统计数据带 */
+/* 优雅滚动条 */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.35);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.6);
+}
+
+.app {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 顶部吸顶条：品牌 + 统计数据带 + 控制按钮 */
 .app-header {
     position: sticky;
     top: 0;
     z-index: 100;
-    padding: 10px 20px;
-    background: rgba(255, 255, 255, 0.92);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid #f0f0f0;
+    padding: 8px 24px;
+    background: var(--bg-header);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border-subtle);
+    transition: background-color 0.25s ease, border-color 0.25s ease;
 }
 
 .app-header-inner {
     display: flex;
     align-items: center;
-    gap: 24px;
+    justify-content: space-between;
+    gap: 20px;
     max-width: var(--page-width);
     margin: 0 auto;
+}
+
+.brand-logo-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+    cursor: default;
+}
+
+.brand-icon {
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
+    transition: transform 0.2s ease;
+}
+
+.brand-icon:hover {
+    transform: rotate(15deg) scale(1.05);
+}
+
+.brand-title {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    white-space: nowrap;
+    background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+[data-theme="dark"] .brand-title {
+    background: linear-gradient(135deg, #60a5fa 0%, #818cf8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
 
 .main-container {
+    flex: 1;
     max-width: var(--page-width);
+    width: 100%;
     margin: 0 auto;
-    padding: 14px 20px 24px;
+    padding: 16px 24px 32px;
 }
 
-/* 表格卡：无边框、头部收紧 */
+/* 统计卡片与指标带 */
+.stat-pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    border-radius: 6px;
+    transition: background-color 0.15s ease;
+}
+
+.stat-pill:hover {
+    background: rgba(148, 163, 184, 0.08);
+}
+
+/* 连接状态指示灯呼吸动画 */
+.status-indicator {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background-color: var(--pulse-color);
+}
+
+.status-dot.connected {
+    background-color: #10b981;
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
+.status-dot.connecting {
+    background-color: #3b82f6;
+    animation: pulse 1.8s infinite;
+}
+
+.status-dot.reconnecting {
+    background-color: #f59e0b;
+    animation: pulse 1.2s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7);
+    }
+    70% {
+        transform: scale(1);
+        box-shadow: 0 0 0 6px rgba(245, 158, 11, 0);
+    }
+    100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+    }
+}
+
+/* 表格卡片样式 */
+.table-card {
+    border-radius: 12px !important;
+    box-shadow: var(--card-shadow);
+    border: 1px solid var(--border-subtle) !important;
+    overflow: hidden;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.table-card:hover {
+    box-shadow: var(--card-shadow-hover);
+}
+
 .table-card .ant-card-head {
-    padding-inline: 14px;
+    padding-inline: 16px;
+    border-bottom: 1px solid var(--border-subtle);
 }
 
 .table-card .ant-card-head-title,
 .table-card .ant-card-extra {
-    padding-block: 10px;
+    padding-block: 12px;
 }
 
-/* 异常行高亮 */
+/* 异常种子行高亮 */
 .ant-table-tbody > tr.issue > td {
-    background: #fff8f8;
+    background: var(--issue-bg) !important;
+    border-color: var(--issue-border) !important;
 }
 
 .ant-table-tbody > tr.issue:hover > td {
-    background: #fee2e2;
+    background: var(--issue-bg-hover) !important;
 }
 
+/* 快速筛选 Tag 徽章 */
+.filter-segmented .ant-segmented-item-selected {
+    font-weight: 600;
+}
+
+/* 复制成功微动效提示 */
+.copy-hover {
+    opacity: 0.5;
+    cursor: pointer;
+    transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.copy-hover:hover {
+    opacity: 1;
+    color: #2563eb;
+}
+
+/* 响应式优化 */
 @media (max-width: 1200px) {
     .app-header-inner {
         flex-wrap: wrap;
@@ -61,10 +246,14 @@ body {
 @media (max-width: 768px) {
     .app-header {
         position: static;
-        padding-block: 8px;
+        padding: 10px 14px;
     }
 
     .main-container {
-        padding-inline: 10px;
+        padding: 12px 14px 20px;
+    }
+
+    .stat-pill {
+        padding: 2px 6px;
     }
 }

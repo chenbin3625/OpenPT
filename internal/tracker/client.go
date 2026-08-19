@@ -201,13 +201,13 @@ func (c *Client) announceUDP(ctx context.Context, trackerURL *url.URL, rawQuery 
 	}
 	connectionID := binary.BigEndian.Uint64(connectResponse[8:16])
 
-	values, err := url.ParseQuery(rawQuery)
+	values, err := parseUDPQuery(rawQuery)
 	if err != nil {
 		return Response{}, fmt.Errorf("parse UDP announce query: %w", err)
 	}
 	for key, vals := range trackerURL.Query() {
-		if _, exists := values[key]; !exists {
-			values[key] = vals
+		if _, exists := values[key]; !exists && len(vals) > 0 {
+			values[key] = vals[0]
 		}
 	}
 	request, tx, err := buildUDPAnnounceRequest(connectionID, values)
@@ -233,40 +233,64 @@ func (c *Client) announceUDP(ctx context.Context, trackerURL *url.URL, rawQuery 
 	}, nil
 }
 
-func buildUDPAnnounceRequest(connectionID uint64, values url.Values) ([]byte, uint32, error) {
-	infoHash := []byte(values.Get("info_hash"))
-	peerID := []byte(values.Get("peer_id"))
+// parseUDPQuery 无损解析 raw query 键值对：使用 PathUnescape 解码 %xx，
+// 保留 '+' 为字面加号（避免 url.ParseQuery 将 '+' 错误解码为空格破坏二进制哈希或 Peer ID）。
+func parseUDPQuery(rawQuery string) (map[string]string, error) {
+	values := make(map[string]string)
+	for rawQuery != "" {
+		var part string
+		part, rawQuery, _ = strings.Cut(rawQuery, "&")
+		if part == "" {
+			continue
+		}
+		key, value, _ := strings.Cut(part, "=")
+		k, err := url.PathUnescape(key)
+		if err != nil {
+			k = key
+		}
+		v, err := url.PathUnescape(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid query value for %s: %w", k, err)
+		}
+		values[k] = v
+	}
+	return values, nil
+}
+
+func buildUDPAnnounceRequest(connectionID uint64, values map[string]string) ([]byte, uint32, error) {
+	infoHash := []byte(values["info_hash"])
+	peerID := []byte(values["peer_id"])
 	if len(infoHash) != 20 {
 		return nil, 0, fmt.Errorf("UDP info_hash must be 20 bytes, got %d", len(infoHash))
 	}
 	if len(peerID) != 20 {
 		return nil, 0, fmt.Errorf("UDP peer_id must be 20 bytes, got %d", len(peerID))
 	}
-	downloaded, err := queryInt64(values, "downloaded")
+	downloaded, err := queryInt64Map(values, "downloaded")
 	if err != nil {
 		return nil, 0, err
 	}
-	left, err := queryInt64(values, "left")
+	left, err := queryInt64Map(values, "left")
 	if err != nil {
 		return nil, 0, err
 	}
-	uploaded, err := queryInt64(values, "uploaded")
+	uploaded, err := queryInt64Map(values, "uploaded")
 	if err != nil {
 		return nil, 0, err
 	}
-	port, err := strconv.ParseUint(values.Get("port"), 10, 16)
+	port, err := strconv.ParseUint(values["port"], 10, 16)
 	if err != nil || port == 0 {
 		return nil, 0, errors.New("UDP port must be in 1..65535")
 	}
 	numwant := int64(-1)
-	if text := values.Get("numwant"); text != "" {
+	if text := values["numwant"]; text != "" {
 		numwant, err = strconv.ParseInt(text, 10, 32)
 		if err != nil {
 			return nil, 0, fmt.Errorf("invalid UDP numwant: %w", err)
 		}
 	}
 	key := uint64(0)
-	if text := values.Get("key"); text != "" {
+	if text := values["key"]; text != "" {
 		key, err = strconv.ParseUint(text, 16, 32)
 		if err != nil {
 			return nil, 0, fmt.Errorf("invalid UDP key: %w", err)
@@ -285,8 +309,8 @@ func buildUDPAnnounceRequest(connectionID uint64, values url.Values) ([]byte, ui
 	binary.BigEndian.PutUint64(request[56:64], uint64(downloaded))
 	binary.BigEndian.PutUint64(request[64:72], uint64(left))
 	binary.BigEndian.PutUint64(request[72:80], uint64(uploaded))
-	binary.BigEndian.PutUint32(request[80:84], udpEvent(values.Get("event")))
-	if ip := net.ParseIP(values.Get("ip")).To4(); ip != nil {
+	binary.BigEndian.PutUint32(request[80:84], udpEvent(values["event"]))
+	if ip := net.ParseIP(values["ip"]).To4(); ip != nil {
 		copy(request[84:88], ip)
 	}
 	binary.BigEndian.PutUint32(request[88:92], uint32(key))
@@ -295,8 +319,8 @@ func buildUDPAnnounceRequest(connectionID uint64, values url.Values) ([]byte, ui
 	return request, tx, nil
 }
 
-func queryInt64(values url.Values, key string) (int64, error) {
-	n, err := strconv.ParseInt(values.Get(key), 10, 64)
+func queryInt64Map(values map[string]string, key string) (int64, error) {
+	n, err := strconv.ParseInt(values[key], 10, 64)
 	if err != nil || n < 0 {
 		return 0, fmt.Errorf("UDP %s must be a non-negative integer", key)
 	}
