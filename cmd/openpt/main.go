@@ -210,12 +210,14 @@ func startMetricsServer(cfg config.Config, bw *bandwidth.Dispatcher, s *schedule
 
 	var webShutdown chan struct{}
 	if cfg.Metrics.WebUI {
-		webHandler := web.New(st, s, bw)
+		webHandler := web.New(st, s, bw, log)
 		// SSE 长连接会让 http.Server.Shutdown 等待到 context 超时；注入停机信号，
 		// 使 Shutdown 开始时 SSE 处理器立即退出。
 		webShutdown = make(chan struct{})
 		webHandler.SetShutdownSignal(webShutdown)
-		webHandler.RegisterRoutes(mux)
+		if err := webHandler.RegisterRoutes(mux); err != nil {
+			return nil, fmt.Errorf("failed to register web UI routes: %w", err)
+		}
 		log.Info("web UI enabled", "url", "http://"+cfg.Metrics.Listen+"/")
 	}
 
@@ -227,8 +229,11 @@ func startMetricsServer(cfg config.Config, bw *bandwidth.Dispatcher, s *schedule
 		Addr:              ln.Addr().String(),
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    1 << 20,
+		// 全量请求（头部+请求体）读超时，防御慢速读取占用连接；
+		// 刻意不设 WriteTimeout：SSE 长连接会因此被定时强制断开。
+		ReadTimeout:    30 * time.Second,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 1 << 20,
 	}
 	if webShutdown != nil {
 		server.RegisterOnShutdown(func() { close(webShutdown) })

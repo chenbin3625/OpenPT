@@ -1,8 +1,6 @@
 package torrent
 
 import (
-	"crypto/sha1"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"net/url"
@@ -11,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/anacrolix/torrent/metainfo"
+	infohashv2 "github.com/anacrolix/torrent/types/infohash-v2"
 )
 
 type Torrent struct {
@@ -34,9 +33,14 @@ func Load(path string) (*Torrent, error) {
 	var hash [20]byte
 	switch {
 	case info.HasV1():
-		hash = sha1.Sum(mi.InfoBytes)
+		// v1 / hybrid：tracker 一律以 20 字节 SHA-1 infohash 为准。
+		hash = metainfo.HashBytes(mi.InfoBytes)
 	case info.HasV2():
-		v2Hash := sha256.Sum256(mi.InfoBytes)
+		// BEP-52：v2-only 种子的 20 字节 trackable infohash 是 info 字典
+		// “原始 bencode 字节”的 SHA-256 截断前 20 字节。
+		// 直接复用 anacrolix 参考实现的 infohash_v2.HashBytes，
+		// 避免两处算法漂移（padding 处理等细节与参考实现保持一致）。
+		v2Hash := infohashv2.HashBytes(mi.InfoBytes)
 		copy(hash[:], v2Hash[:20])
 	default:
 		return nil, fmt.Errorf("torrent info dictionary is neither v1 nor v2")

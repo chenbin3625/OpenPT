@@ -66,17 +66,22 @@ const GROUP_CONFIG = [
 export default function ConfigDrawer({ open, onClose }) {
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
     const { token } = theme.useToken();
 
     useEffect(() => {
         if (!open) return;
         let cancelled = false;
         setLoading(true);
+        setError(null);
         fetchConfig()
             .then(data => {
                 if (!cancelled) setItems(data);
             })
-            .catch(err => console.error(err))
+            .catch(err => {
+                console.error(err);
+                if (!cancelled) setError('配置加载失败，请确认后端服务状态后重试');
+            })
             .finally(() => {
                 if (!cancelled) setLoading(false);
             });
@@ -143,6 +148,17 @@ export default function ConfigDrawer({ open, onClose }) {
         >
             <Spin spinning={loading}>
                 <Space direction="vertical" size={14} style={{ width: '100%' }}>
+                    {error && (
+                        <Alert
+                            message="加载失败"
+                            description={error}
+                            type="error"
+                            showIcon
+                            closable
+                            onClose={() => setError(null)}
+                            style={{ borderRadius: 8 }}
+                        />
+                    )}
                     <Alert
                         message="提示"
                         description="修改 config.toml 配置文件后，可发送 SIGHUP 信号或重启服务应用新配置。"

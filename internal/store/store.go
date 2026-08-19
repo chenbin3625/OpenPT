@@ -447,8 +447,14 @@ func (s *Store) removeFileQuiet(path string) *torrent.Torrent {
 }
 
 func (s *Store) emit(ev Event, path string) {
+	start := time.Now()
 	select {
 	case s.events <- ev:
+		// 事件缓冲被瞬时尖峰填满时会阻塞 watcher/扫描协程。正常吞吐极高，
+		// 此处仅在等待超过 1s 时告警，便于在极端批量场景下定位。
+		if wait := time.Since(start); wait > time.Second {
+			s.log.Warn("torrent event delivery was slow", "path", path, "type", ev.Type, "blocked_for", wait.Round(time.Millisecond).String())
+		}
 	case <-s.ctx.Done():
 		s.log.Debug("torrent event discarded during shutdown", "path", path, "type", ev.Type)
 	}

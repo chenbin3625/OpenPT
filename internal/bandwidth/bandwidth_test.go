@@ -1,6 +1,7 @@
 package bandwidth
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -197,5 +198,38 @@ func TestTickCapsUploadedAfterSuspend(t *testing.T) {
 	// 1000 Bps * 2s = 2000，而非 1000 * 3600 = 3,600,000
 	if st.Uploaded > 2100 || st.Uploaded < 1900 {
 		t.Fatalf("uploaded = %d after suspend, want about 2000 (capped at 2s)", st.Uploaded)
+	}
+}
+
+// TestNormalizeConfigClampsHugeRates 验证接近 int64 上限的速率配置被钳制到安全值，
+// 防止 refreshCurrentRateLocked 中 maxRate-minRate+1 溢出导致 rng.Int63n panic。
+func TestNormalizeConfigClampsHugeRates(t *testing.T) {
+	cfg := normalizeConfig(Config{
+		Strategy:             "configured_rate",
+		ConfiguredRateBps:    math.MaxInt64,
+		MinRateBps:           0,
+		MaxRateBps:           math.MaxInt64,
+		RandomRefreshSeconds: 60,
+	})
+	if cfg.MaxRateBps != maxSaneRateBps {
+		t.Fatalf("max rate clamped = %d, want %d", cfg.MaxRateBps, maxSaneRateBps)
+	}
+	if cfg.ConfiguredRateBps != maxSaneRateBps {
+		t.Fatalf("configured rate clamped = %d, want %d", cfg.ConfiguredRateBps, maxSaneRateBps)
+	}
+
+	d := New(Config{
+		Strategy:             "configured_rate",
+		ConfiguredRateBps:    math.MaxInt64,
+		MinRateBps:           0,
+		MaxRateBps:           math.MaxInt64,
+		RandomRefreshSeconds: 60,
+	})
+	d.Register("hash")
+	// refreshCurrentRateLocked 应在钳制后的区间内随机，不 panic 且速率合法。
+	d.refreshCurrentRateLocked(time.Now())
+	rate := d.CurrentRate()
+	if rate < 0 || rate > maxSaneRateBps {
+		t.Fatalf("current rate = %d out of [0, %d]", rate, maxSaneRateBps)
 	}
 }

@@ -30,6 +30,10 @@ const persistentGeneratorTTL = 120 * time.Minute
 
 var cryptoRandReader io.Reader = rand.Reader
 
+// unresolvedPlaceholder 匹配客户端模板中未替换的占位符，用于渲染后报错。
+// 提升为包级变量，避免在每次 announce 热路径重复编译正则。
+var unresolvedPlaceholder = regexp.MustCompile(`\{.*?\}`)
+
 type Header struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
@@ -263,7 +267,7 @@ func (c *Client) RenderQuery(in RenderInput) (string, error) {
 		}
 		q = strings.ReplaceAll(q, "{key}", c.Encoder.EncodeString(c.key.Get(id, in.Event)))
 	}
-	if m := regexp.MustCompile(`\{.*?\}`).FindString(q); m != "" {
+	if m := unresolvedPlaceholder.FindString(q); m != "" {
 		return "", fmt.Errorf("unrecognized client placeholder %s", m)
 	}
 	q = collapseAmpersands(q)
@@ -510,8 +514,8 @@ func (a digitHexAlgorithm) Generate() string {
 	if a.min >= a.max {
 		return strconv.FormatInt(a.min, 16)
 	}
-	// 均匀随机 [min, max]。范围可能接近整个 int64 域（如 max=MaxInt64），
-	// int64 下 (max-min+1) 会溢出为负导致 randInt64 返回 0，生成恒定 key。
+	// 范围可能接近整个 int64 域（如 max=MaxInt64），
+	// int64 下 (max-min+1) 会溢出为负导致随机区间失效，生成恒定 key。
 	// 改用 big.Int 表示区间长度，无溢出风险。
 	span := new(big.Int).Sub(big.NewInt(a.max), big.NewInt(a.min))
 	span.Add(span, big.NewInt(1))
@@ -558,15 +562,4 @@ func randInt(max int) int {
 		panic(fmt.Sprintf("clientemu: crypto/rand failed for randInt(%d): %v", max, err))
 	}
 	return int(n.Int64())
-}
-
-func randInt64(max int64) int64 {
-	if max <= 0 {
-		return 0
-	}
-	n, err := rand.Int(cryptoRandReader, big.NewInt(max))
-	if err != nil {
-		panic(fmt.Sprintf("clientemu: crypto/rand failed for randInt64(%d): %v", max, err))
-	}
-	return n.Int64()
 }

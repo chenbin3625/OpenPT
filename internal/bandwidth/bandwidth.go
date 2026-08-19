@@ -22,6 +22,11 @@ type Stats struct {
 // 极易被站点判定为作弊。超过该上限时按上限计算，等价于"挂起期间不伪造上传"。
 const maxTickElapsed = 2 * time.Second
 
+// maxSaneRateBps 是配置速率（及 min/max 波动区间）的防御性上限。
+// 防止 maxRate-minRate+1 在用户配置接近 int64 上限时溢出为负，
+// 导致 refreshCurrentRateLocked 中 rng.Int63n(负值) panic。实际速率远小于该值。
+const maxSaneRateBps = 1 << 40 // 1 TiB/s
+
 type Config struct {
 	Strategy             string
 	ConservativeRateBps  int64
@@ -69,7 +74,9 @@ func New(cfg Config) *Dispatcher {
 		lastTick:      time.Now(),
 		stats:         map[string]*Stats{},
 		stop:          make(chan struct{}),
-		rng:           rand.New(rand.NewSource(time.Now().UnixNano())),
+		// 带宽抖动不涉及安全对抗，使用 math/rand + 时间种子即可；
+		// peer_id / key 等需要不可预测性的场景走 clientemu 的 crypto/rand。
+		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	d.refreshCurrentRateLocked(time.Now())
 	return d
@@ -262,6 +269,20 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.MaxRateBps > 0 && cfg.MinRateBps > cfg.MaxRateBps {
 		cfg.MinRateBps = cfg.MaxRateBps
 	}
+	// 防御性钳制：速率上限远小于 int64 域，避免 refreshCurrentRateLocked
+	// 中 maxRate-minRate+1 溢出为负导致 rng.Int63n panic。
+	if cfg.MinRateBps > maxSaneRateBps {
+		cfg.MinRateBps = maxSaneRateBps
+	}
+	if cfg.MaxRateBps > maxSaneRateBps {
+		cfg.MaxRateBps = maxSaneRateBps
+	}
+	if cfg.ConservativeRateBps > maxSaneRateBps {
+		cfg.ConservativeRateBps = maxSaneRateBps
+	}
+	if cfg.ConfiguredRateBps > maxSaneRateBps {
+		cfg.ConfiguredRateBps = maxSaneRateBps
+	}
 	return cfg
 }
 
@@ -277,7 +298,14 @@ func (d *Dispatcher) refreshCurrentRateLocked(now time.Time) {
 			d.currentRate = maxRate
 			return
 		}
-		d.currentRate = minRate + d.rng.Int63n(maxRate-minRate+1)
+		// maxRate 已被 normalizeConfig 钳制到 maxSaneRateBps，span 不会溢出；
+		// 这里仍做一次防御，避免极端路径下 Int63n panic。
+		span := maxRate - minRate + 1
+		if span <= 0 {
+			d.currentRate = minRate
+			return
+		}
+		d.currentRate = minRate + d.rng.Int63n(span)
 		return
 	}
 	if d.baseRateBps == 0 {
