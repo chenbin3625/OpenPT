@@ -355,7 +355,8 @@ func TestPersistedUploadedIsRestoredForStartedAnnounce(t *testing.T) {
 }
 
 func TestMinIntervalOverridesSmallerInterval(t *testing.T) {
-	// tracker 返回 interval=1 但 min interval=3，调度器应采用较大值 3，避免过于频繁上报
+	// tracker 返回 interval=1 但 min interval=3：先取较大值 3，再被防御性下限
+	// 钳制到 minAnnounceIntervalSeconds（30s），避免任何路径出现过频上报被站点封禁。
 	server := trackerResponseServer("d8:intervali1e12:min intervali3e8:completei2e10:incompletei1ee")
 	defer server.Close()
 
@@ -368,7 +369,26 @@ func TestMinIntervalOverridesSmallerInterval(t *testing.T) {
 	})
 	waitUntil(t, func() bool {
 		status := s.Status()
-		return len(status) == 1 && status[0].LastIntervalSec == 3
+		return len(status) == 1 && status[0].LastIntervalSec == int64(minAnnounceIntervalSeconds)
+	})
+}
+
+func TestMissingIntervalClampedToFloor(t *testing.T) {
+	// tracker 响应缺失 interval/min interval 时，若沿用初始 5s 间隔会导致
+	// 无限高频上报；应钳制到 minAnnounceIntervalSeconds。
+	server := trackerResponseServer("d8:completei2e10:incompletei1ee")
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := newTestScheduler(t, ctx, server.URL, 1, 1)
+	s.fillSlots(ctx)
+	waitUntil(t, func() bool {
+		return s.ActiveCount() == 1
+	})
+	waitUntil(t, func() bool {
+		status := s.Status()
+		return len(status) == 1 && status[0].LastIntervalSec == int64(minAnnounceIntervalSeconds)
 	})
 }
 

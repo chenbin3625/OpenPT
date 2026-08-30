@@ -167,10 +167,10 @@ func trackerOptions(cfg config.Config) tracker.Options {
 	}
 }
 
+// startMetricsServer 启动 HTTP 服务。/healthz 始终注册：容器 HEALTHCHECK 依赖它，
+// 不能随 metrics.enabled 关闭而消失；/metrics 与 Web UI 分别由 metrics.enabled /
+// metrics.webui 控制。因此即使禁用 metrics，也会占用 metrics.listen 端口。
 func startMetricsServer(cfg config.Config, bw *bandwidth.Dispatcher, s *scheduler.Scheduler, st *store.Store, log *slog.Logger) (*http.Server, error) {
-	if !cfg.Metrics.Enabled {
-		return nil, nil
-	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -184,29 +184,31 @@ func startMetricsServer(cfg config.Config, bw *bandwidth.Dispatcher, s *schedule
 			_, _ = io.WriteString(w, "ok\n")
 		}
 	})
-	mux.HandleFunc(cfg.Metrics.Path, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		fmt.Fprintln(w, "# HELP openpt_bandwidth_current_rate_bps Current configured synthetic upload bandwidth in bytes per second.")
-		fmt.Fprintln(w, "# TYPE openpt_bandwidth_current_rate_bps gauge")
-		fmt.Fprintf(w, "openpt_bandwidth_current_rate_bps %d\n", bw.CurrentRate())
-		fmt.Fprintln(w, "# HELP openpt_active_torrents Number of currently active torrents.")
-		fmt.Fprintln(w, "# TYPE openpt_active_torrents gauge")
-		fmt.Fprintf(w, "openpt_active_torrents %d\n", s.ActiveCount())
-		fmt.Fprintln(w, "# HELP openpt_torrent_uploaded_bytes Total synthetic uploaded bytes reported per torrent.")
-		fmt.Fprintln(w, "# TYPE openpt_torrent_uploaded_bytes counter")
-		fmt.Fprintln(w, "# HELP openpt_torrent_speed_bps Current synthetic upload speed in bytes per second per torrent.")
-		fmt.Fprintln(w, "# TYPE openpt_torrent_speed_bps gauge")
-		fmt.Fprintln(w, "# HELP openpt_torrent_seeders Last tracker seeder count per torrent.")
-		fmt.Fprintln(w, "# TYPE openpt_torrent_seeders gauge")
-		fmt.Fprintln(w, "# HELP openpt_torrent_leechers Last tracker leecher count per torrent.")
-		fmt.Fprintln(w, "# TYPE openpt_torrent_leechers gauge")
-		for infoHash, st := range bw.Snapshot() {
-			fmt.Fprintf(w, "openpt_torrent_uploaded_bytes{info_hash=%q} %d\n", infoHash, st.Uploaded)
-			fmt.Fprintf(w, "openpt_torrent_speed_bps{info_hash=%q} %d\n", infoHash, st.CurrentSpeedBps)
-			fmt.Fprintf(w, "openpt_torrent_seeders{info_hash=%q} %d\n", infoHash, st.Seeders)
-			fmt.Fprintf(w, "openpt_torrent_leechers{info_hash=%q} %d\n", infoHash, st.Leechers)
-		}
-	})
+	if cfg.Metrics.Enabled {
+		mux.HandleFunc(cfg.Metrics.Path, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+			fmt.Fprintln(w, "# HELP openpt_bandwidth_current_rate_bps Current configured synthetic upload bandwidth in bytes per second.")
+			fmt.Fprintln(w, "# TYPE openpt_bandwidth_current_rate_bps gauge")
+			fmt.Fprintf(w, "openpt_bandwidth_current_rate_bps %d\n", bw.CurrentRate())
+			fmt.Fprintln(w, "# HELP openpt_active_torrents Number of currently active torrents.")
+			fmt.Fprintln(w, "# TYPE openpt_active_torrents gauge")
+			fmt.Fprintf(w, "openpt_active_torrents %d\n", s.ActiveCount())
+			fmt.Fprintln(w, "# HELP openpt_torrent_uploaded_bytes Total synthetic uploaded bytes reported per torrent.")
+			fmt.Fprintln(w, "# TYPE openpt_torrent_uploaded_bytes counter")
+			fmt.Fprintln(w, "# HELP openpt_torrent_speed_bps Current synthetic upload speed in bytes per second per torrent.")
+			fmt.Fprintln(w, "# TYPE openpt_torrent_speed_bps gauge")
+			fmt.Fprintln(w, "# HELP openpt_torrent_seeders Last tracker seeder count per torrent.")
+			fmt.Fprintln(w, "# TYPE openpt_torrent_seeders gauge")
+			fmt.Fprintln(w, "# HELP openpt_torrent_leechers Last tracker leecher count per torrent.")
+			fmt.Fprintln(w, "# TYPE openpt_torrent_leechers gauge")
+			for infoHash, st := range bw.Snapshot() {
+				fmt.Fprintf(w, "openpt_torrent_uploaded_bytes{info_hash=%q} %d\n", infoHash, st.Uploaded)
+				fmt.Fprintf(w, "openpt_torrent_speed_bps{info_hash=%q} %d\n", infoHash, st.CurrentSpeedBps)
+				fmt.Fprintf(w, "openpt_torrent_seeders{info_hash=%q} %d\n", infoHash, st.Seeders)
+				fmt.Fprintf(w, "openpt_torrent_leechers{info_hash=%q} %d\n", infoHash, st.Leechers)
+			}
+		})
+	}
 
 	var webShutdown chan struct{}
 	if cfg.Metrics.WebUI {
@@ -239,7 +241,11 @@ func startMetricsServer(cfg config.Config, bw *bandwidth.Dispatcher, s *schedule
 		server.RegisterOnShutdown(func() { close(webShutdown) })
 	}
 	go func() {
-		log.Info("metrics server started", "listen", server.Addr, "path", cfg.Metrics.Path)
+		if cfg.Metrics.Enabled {
+			log.Info("metrics server started", "listen", server.Addr, "path", cfg.Metrics.Path)
+		} else {
+			log.Info("health server started (metrics disabled)", "listen", server.Addr)
+		}
 		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Warn("metrics server stopped with error", "error", err)
 		}

@@ -95,7 +95,7 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("unknown config field %q", undecoded[0].String())
 		}
 	} else {
-		// 为了向后兼容，仍然支持 JSON 格式（但会输出警告）
+		// 仅支持 TOML；v0.2.0 起已移除旧的 JSON 配置支持
 		return Config{}, fmt.Errorf("JSON config format is deprecated, please migrate to TOML format (config.toml)")
 	}
 
@@ -279,10 +279,12 @@ func (c Config) Validate() error {
 	if err := validateProxy(c.Tracker.Proxy); err != nil {
 		return err
 	}
+	// metrics.listen 始终用于 /healthz 健康检查（不随 metrics.enabled 关闭），
+	// 因此无论是否启用 metrics 都要求它是合法的监听地址。
+	if err := validateListenAddress(c.Metrics.Listen); err != nil {
+		return err
+	}
 	if c.Metrics.Enabled {
-		if err := validateListenAddress(c.Metrics.Listen); err != nil {
-			return err
-		}
 		if err := validateMetricsPath(c.Metrics.Path); err != nil {
 			return err
 		}

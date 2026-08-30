@@ -77,6 +77,9 @@ type Client struct {
 	peer          *Generator
 	key           *Generator
 	PeerURLEncode bool
+	// KeyURLEncode 取自 keyGenerator.shouldUrlEncode，与 peerIdGenerator 的
+	// shouldUrlEncode 语义一致；未配置时不做百分号编码。
+	KeyURLEncode bool
 }
 
 func LoadClient(path string) (*Client, error) {
@@ -109,11 +112,13 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		return nil, fmt.Errorf("peerIdGenerator: %w", err)
 	}
 	var key *Generator
+	keyURLEncode := false
 	if cfg.KeyGenerator != nil {
 		key, err = NewGenerator(*cfg.KeyGenerator, false)
 		if err != nil {
 			return nil, fmt.Errorf("keyGenerator: %w", err)
 		}
+		keyURLEncode = cfg.KeyGenerator.ShouldURLEncode
 	} else if strings.Contains(cfg.Query, "{key}") {
 		return nil, errors.New("query contains {key}, but keyGenerator is missing")
 	}
@@ -139,6 +144,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		peer:          peer,
 		key:           key,
 		PeerURLEncode: cfg.PeerGenerator.ShouldURLEncode,
+		KeyURLEncode:  keyURLEncode,
 	}, nil
 }
 
@@ -265,7 +271,11 @@ func (c *Client) RenderQuery(in RenderInput) (string, error) {
 		if c.key == nil {
 			return "", errors.New("query contains {key}, but no key generator exists")
 		}
-		q = strings.ReplaceAll(q, "{key}", c.Encoder.EncodeString(c.key.Get(id, in.Event)))
+		key := c.key.Get(id, in.Event)
+		if c.KeyURLEncode {
+			key = c.Encoder.EncodeString(key)
+		}
+		q = strings.ReplaceAll(q, "{key}", key)
 	}
 	if m := unresolvedPlaceholder.FindString(q); m != "" {
 		return "", fmt.Errorf("unrecognized client placeholder %s", m)

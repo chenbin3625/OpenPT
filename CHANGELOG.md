@@ -2,6 +2,21 @@
 
 本项目以 Git tag 发布版本。每次发布都会在 GitHub Release 中附上对应说明。
 
+## v0.2.4 - 2026-08-30
+
+### 正确性与健壮性
+- **重复种子副本不再清零上传状态**：同一 infohash 在 torrents 目录存在多份副本时，删除其中一份不再向调度器发送 Removed 事件（此前会停止该种子并把持久化上传量与 completed 状态当作"文件被删除"清零），仅当最后一份副本被删除时才停止
+- **Announce 间隔防御性下限**：tracker 响应缺失 interval（为 0）或显式给出过小间隔时，钳制到至少 30 秒（上限仍为 7 天），避免以初始 5 秒间隔无限高频上报触发站点反作弊封禁
+- **健康检查与 metrics.enabled 解耦**：`/healthz` 始终可用（容器 HEALTHCHECK 依赖），即使 `enabled = false`，程序仍监听 metrics.listen 并只提供该接口（`/metrics` 与 Web UI 停止服务）；`metrics.listen` 无论开关都校验为合法监听地址
+- **环境变量代理不再劫持上报**：`tracker.proxy` 未配置时显式直连，`HTTP_PROXY`/`HTTPS_PROXY` 等环境变量不再影响 Tracker 上报流量，需要代理请显式配置 `tracker.proxy`
+- **周期扫描按文件指纹短路**：周期扫描对 mtime+size 未变化的种子文件跳过重新解析与 info 哈希，显著降低大种子库下的持续 CPU/磁盘开销（fsnotify 主路径行为不变）
+
+### 一致性与细节
+- **「无下载者」不再输出为异常原因**：仅有做种者属于正常做种状态（此时带宽权重为 0），下载者数量在列表中有独立展示，消除 has_issue 与 issue_reason 不一致的问题
+- **keyGenerator.shouldUrlEncode 生效**：与 peerIdGenerator 的 shouldUrlEncode 语义一致（未配置时不做百分号编码）；内置客户端 profile 的 key 均为纯十六进制/字母数字，实际行为不变
+- 修正 `config.Load` 过期注释（JSON 配置 v0.2.0 起已不支持）；为 `complete - 1`（排除自身的做种者计数）补充设计说明
+- README：注明本地 `node_modules` 中 flatted 附带的 Go 参考实现会被 `go ./...` 通配编译（已被 .gitignore 排除，不影响 CI）；补充 tracker.proxy 留空即直连、`/healthz` 始终可用的说明
+
 ## v0.2.3 - 2026-08-20
 
 ### 健壮性与正确性

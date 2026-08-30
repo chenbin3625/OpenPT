@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"openpt/internal/torrent"
 )
 
 func TestScanAndNotifyDetectsAddedAndRemovedTorrent(t *testing.T) {
@@ -342,6 +344,111 @@ func TestScheduleLoadDebouncesSamePath(t *testing.T) {
 	case ev := <-s.Events():
 		t.Fatalf("unexpected extra event after debounce = %+v", ev)
 	case <-time.After(watcherSettleDelay + 100*time.Millisecond):
+	}
+}
+
+// TestRemovingDuplicateInfoHashCopyKeepsTorrent 验证：同一 infohash 在 torrents 目录
+// 存在多份副本时，删除其中一份不应发出 Removed（否则调度器会停止该种子并清掉其
+// 持久化上传量与 completed 状态）；只有最后一份副本被删除后才通知调度器停止。
+func TestRemovingDuplicateInfoHashCopyKeepsTorrent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	s := NewWithScanInterval(ctx, dir, "", 0, discardLogger())
+
+	pathA := filepath.Join(dir, "a.torrent")
+	pathB := filepath.Join(dir, "b.torrent")
+	// 同 announce + 同 name + 同 size ⇒ 同 infohash
+	writeTestTorrent(t, pathA, "http://tracker.example/announce", "dup.bin", 100)
+	writeTestTorrent(t, pathB, "http://tracker.example/announce", "dup.bin", 100)
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range []Event{receiveEvent(t, s), receiveEvent(t, s)} {
+		if ev.Type != Added {
+			t.Fatalf("event during initial scan = %+v, want Added", ev)
+		}
+	}
+
+	// 删除副本 A：B 仍在，不应产生 Removed
+	if err := os.Remove(pathA); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ev := <-s.Events():
+		t.Fatalf("unexpected event while duplicate copy remains = %+v", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := s.Status(); len(got) != 1 || got[0].Name != "dup.bin" {
+		t.Fatalf("store status after removing one duplicate = %+v, want [dup.bin]", got)
+	}
+
+	// 删除最后一份副本 B：应正常发出 Removed
+	if err := os.Remove(pathB); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	removed := receiveEvent(t, s)
+	if removed.Type != Removed || removed.Torrent.Name != "dup.bin" {
+		t.Fatalf("event after removing last copy = %+v, want Removed dup.bin", removed)
+	}
+}
+
+// TestScanSkipsUnchangedTorrentFiles 验证周期扫描按 mtime+size 指纹短路：
+// 未变化的文件不会被重新解析（byPath 条目指针保持不变），变化后才重新加载。
+func TestScanSkipsUnchangedTorrentFiles(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	s := NewWithScanInterval(ctx, dir, "", 0, discardLogger())
+
+	path := filepath.Join(dir, "keep.torrent")
+	writeTestTorrent(t, path, "http://tracker.example/announce", "keep.bin", 100)
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	_ = receiveEvent(t, s)
+
+	loaded := func() *torrent.Torrent {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		return s.byPath[path]
+	}
+
+	first := loaded()
+	// 未变化：再次扫描不应重新加载
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	if second := loaded(); first != second {
+		t.Fatal("unchanged torrent file was reloaded by periodic scan")
+	}
+	select {
+	case ev := <-s.Events():
+		t.Fatalf("unexpected event for unchanged torrent = %+v", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// 内容变化（不同 size ⇒ 不同 infohash）：应重新加载并发出 Removed + Added
+	writeTestTorrent(t, path, "http://tracker.example/announce", "keep.bin", 200)
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	if third := loaded(); third == first {
+		t.Fatal("changed torrent file was not reloaded by periodic scan")
+	}
+	removed := receiveEvent(t, s)
+	if removed.Type != Removed {
+		t.Fatalf("event after change = %+v, want Removed", removed)
+	}
+	added := receiveEvent(t, s)
+	if added.Type != Added {
+		t.Fatalf("event after change = %+v, want Added", added)
 	}
 }
 

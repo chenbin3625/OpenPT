@@ -58,10 +58,20 @@ type Store struct {
 	log          *slog.Logger
 	mu           sync.RWMutex
 	byPath       map[string]*torrent.Torrent
-	events       chan Event
-	debounceMu   sync.Mutex
+	// loadedMeta 记录每个路径成功加载时的文件大小与修改时间，
+	// 供周期扫描短路跳过未变化的文件，避免每个周期全量重新解析与哈希。
+	loadedMeta map[string]fileMeta
+	events     chan Event
+	debounceMu sync.Mutex
+	// pendingLoads/nextLoadID 用于 watcher 事件的防抖，避免并发加载同一路径。
 	pendingLoads map[string]uint64
 	nextLoadID   uint64
+}
+
+// fileMeta 是加载成功时文件的指纹；零值不表示"未加载"（以 map 中是否存在为准）。
+type fileMeta struct {
+	size    int64
+	modTime time.Time
 }
 
 func New(ctx context.Context, torrentsDir, archiveDir string, log *slog.Logger) *Store {
@@ -76,6 +86,7 @@ func NewWithScanInterval(ctx context.Context, torrentsDir, archiveDir string, sc
 		scanInterval: scanInterval,
 		log:          log,
 		byPath:       map[string]*torrent.Torrent{},
+		loadedMeta:   map[string]fileMeta{},
 		events:       make(chan Event, eventBufferSize), // 增加缓冲区避免阻塞
 		pendingLoads: map[string]uint64{},
 	}
@@ -189,6 +200,11 @@ func (s *Store) scanDir(notify bool) error {
 		}
 		path := filepath.Join(s.torrentsDir, e.Name())
 		seen[path] = true
+		// 周期扫描是 fsnotify 的兜底路径：文件指纹未变时跳过重新解析，
+		// 避免每个扫描周期对全部种子做完整 bencode 解析与 info 哈希。
+		if s.hasUnchangedMeta(path) {
+			continue
+		}
 		if notify {
 			s.loadFile(path)
 		} else {
@@ -207,7 +223,8 @@ func (s *Store) scanDir(notify bool) error {
 		if notify {
 			s.removeFile(path)
 		} else {
-			s.removeFileQuiet(path)
+			// 初始静默扫描：调度器尚未启动，移除条目但不发事件
+			s.removeTorrentEntry(path)
 		}
 	}
 	return nil
@@ -234,8 +251,12 @@ func (s *Store) loadFileQuiet(path string) {
 		s.handleLoadFailure(path, err)
 		return
 	}
+	meta := s.statFileMeta(path)
 	s.mu.Lock()
 	s.byPath[path] = t
+	if meta != nil {
+		s.loadedMeta[path] = *meta
+	}
 	s.mu.Unlock()
 	s.log.Info("torrent loaded", "path", path, "name", t.Name, "size", t.Size, "info_hash", t.InfoHashHex())
 }
@@ -246,9 +267,13 @@ func (s *Store) loadFile(path string) {
 		s.handleLoadFailure(path, err)
 		return
 	}
+	meta := s.statFileMeta(path)
 	s.mu.Lock()
 	old := s.byPath[path]
 	s.byPath[path] = t
+	if meta != nil {
+		s.loadedMeta[path] = *meta
+	}
 	s.mu.Unlock()
 	if old != nil && old.InfoHash == t.InfoHash && slices.Equal(old.AnnounceList, t.AnnounceList) {
 		return
@@ -261,8 +286,14 @@ func (s *Store) loadFile(path string) {
 		return
 	}
 	if old != nil {
-		s.log.Info("torrent replaced", "path", path, "old_info_hash", old.InfoHashHex(), "new_info_hash", t.InfoHashHex())
-		s.emit(Event{Type: Removed, Torrent: old}, path)
+		if s.hasOtherPathWithInfoHash(path, old.InfoHash) {
+			// 旧 infohash 在其它路径仍有副本：不发出 Removed，避免调度器把
+			// 仍存在的种子当作"文件被删除"而清零其持久化上传状态。
+			s.log.Info("torrent replaced; old infohash still present at another path", "path", path, "old_info_hash", old.InfoHashHex(), "new_info_hash", t.InfoHashHex())
+		} else {
+			s.log.Info("torrent replaced", "path", path, "old_info_hash", old.InfoHashHex(), "new_info_hash", t.InfoHashHex())
+			s.emit(Event{Type: Removed, Torrent: old}, path)
+		}
 	}
 	s.log.Info("torrent loaded", "path", path, "name", t.Name, "size", t.Size, "info_hash", t.InfoHashHex())
 	s.emit(Event{Type: Added, Torrent: t}, path)
@@ -319,7 +350,7 @@ func (s *Store) cancelPendingLoad(path string) {
 //     归档失败则保留原文件与旧条目，等待下次扫描重试。
 func (s *Store) handleLoadFailure(path string, loadErr error) {
 	if errors.Is(loadErr, os.ErrNotExist) {
-		if old := s.removeFileQuiet(path); old != nil {
+		if old, notify := s.removeTorrentEntry(path); notify {
 			s.log.Info("torrent removed", "path", path, "info_hash", old.InfoHashHex())
 			s.emit(Event{Type: Removed, Torrent: old}, path)
 		}
@@ -340,7 +371,7 @@ func (s *Store) handleLoadFailure(path string, loadErr error) {
 	}
 	s.log.Warn("torrent load failed, archived", "path", path, "archive", dest, "reason", loadErr)
 	// 文件已移走：移除旧条目并通知调度器停止
-	if old := s.removeFileQuiet(path); old != nil {
+	if old, notify := s.removeTorrentEntry(path); notify {
 		s.log.Info("torrent removed", "path", path, "info_hash", old.InfoHashHex())
 		s.emit(Event{Type: Removed, Torrent: old}, path)
 	}
@@ -427,23 +458,70 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-func (s *Store) removeFile(path string) {
+// hasOtherPathWithInfoHash 报告除 excludePath 外是否还有其它已加载条目持有同一 infohash。
+func (s *Store) hasOtherPathWithInfoHash(excludePath string, hash [20]byte) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for p, other := range s.byPath {
+		if p != excludePath && other.InfoHash == hash {
+			return true
+		}
+	}
+	return false
+}
+
+// hasUnchangedMeta 报告 path 是否已按当前文件内容成功加载过（size 与 mtime 均未变化）。
+// 用于周期扫描短路；watcher 触发的加载不经过此检查。
+func (s *Store) hasUnchangedMeta(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	meta, ok := s.loadedMeta[path]
+	return ok && meta.size == info.Size() && meta.modTime.Equal(info.ModTime())
+}
+
+// statFileMeta 在加载成功后调用，取当前文件指纹；文件已被移走时返回 nil。
+func (s *Store) statFileMeta(path string) *fileMeta {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	return &fileMeta{size: info.Size(), modTime: info.ModTime()}
+}
+
+// removeTorrentEntry 删除 path 对应的 store 条目（含文件指纹），返回被移除的种子
+// 以及是否应当向调度器发出 Removed 事件。
+// 当同一 infohash 在其它路径仍有副本时返回 notify=false：删除其中一份副本不应停止
+// 调度器，否则该种子的持久化上传量与 completed 状态会被当作"文件被删除"而清零。
+func (s *Store) removeTorrentEntry(path string) (*torrent.Torrent, bool) {
 	s.mu.Lock()
 	t := s.byPath[path]
 	delete(s.byPath, path)
+	delete(s.loadedMeta, path)
+	if t == nil {
+		s.mu.Unlock()
+		return nil, false
+	}
+	duplicated := false
+	for _, other := range s.byPath {
+		if other.InfoHash == t.InfoHash {
+			duplicated = true
+			break
+		}
+	}
 	s.mu.Unlock()
-	if t != nil {
+	return t, !duplicated
+}
+
+func (s *Store) removeFile(path string) {
+	t, notify := s.removeTorrentEntry(path)
+	if notify {
 		s.log.Info("torrent removed", "path", path, "info_hash", t.InfoHashHex())
 		s.emit(Event{Type: Removed, Torrent: t}, path)
 	}
-}
-
-func (s *Store) removeFileQuiet(path string) *torrent.Torrent {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t := s.byPath[path]
-	delete(s.byPath, path)
-	return t
 }
 
 func (s *Store) emit(ev Event, path string) {

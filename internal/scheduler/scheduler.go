@@ -46,6 +46,12 @@ const ratioCheckInterval = time.Second
 // 定时器立即触发，失去节流地疯狂上报。
 const maxAnnounceIntervalSeconds = 7 * 24 * 3600 // 7 天
 
+// minAnnounceIntervalSeconds 是 tracker interval 的防御性下限。
+// 响应缺失 interval（为 0）时调度器会沿用上次的间隔（初始为 5s），若不设下限，
+// 将以 5 秒一次的频率无限 regular 上报，极易被站点反作弊判定为异常客户端。
+// 正常 tracker 的 interval 不会低于该值。
+const minAnnounceIntervalSeconds = 30
+
 type Result struct {
 	NextEvent clientemu.Event
 	Delay     time.Duration
@@ -509,8 +515,11 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 			a.lastError = ""
 			a.lastAnnounce = now
 			a.mu.Unlock()
-			// 遵守 tracker 的 min interval：取 interval 与 min interval 的较大值，
-			// 避免过于频繁上报被站点 ban。
+			// 遵守 tracker 的 min interval：取 interval 与 min interval 的较大值。
+			// 随后钳制到 [minAnnounceIntervalSeconds, maxAnnounceIntervalSeconds]：
+			// 下限防止响应缺失 interval（为 0）时沿用初始 5s 间隔无限高频上报、
+			// 或 tracker 显式给出过小的间隔；上限防止 interval 接近 int64 上限
+			// 时 Duration 溢出为负。
 			intervalSeconds := resp.Interval
 			if resp.MinInterval > intervalSeconds {
 				intervalSeconds = resp.MinInterval
@@ -518,12 +527,13 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 			if intervalSeconds > maxAnnounceIntervalSeconds {
 				intervalSeconds = maxAnnounceIntervalSeconds
 			}
-			if intervalSeconds > 0 {
-				interval := time.Duration(intervalSeconds) * time.Second
-				a.mu.Lock()
-				a.lastInterval = interval
-				a.mu.Unlock()
+			if intervalSeconds < minAnnounceIntervalSeconds {
+				intervalSeconds = minAnnounceIntervalSeconds
 			}
+			interval := time.Duration(intervalSeconds) * time.Second
+			a.mu.Lock()
+			a.lastInterval = interval
+			a.mu.Unlock()
 			// 在持有 s.mu 时校验种子仍处于 active 并完成 bw 注册/更新，与
 			// stopTorrent/completeTorrent 的 removeActive + bw.Unregister 串行化，
 			// 避免并发取消时重建已被注销的 bw 条目，产生持续累计上传的孤儿条目。
@@ -918,14 +928,14 @@ func (s *Scheduler) Status() []TorrentStatus {
 				issueReasons = append(issueReasons, fmt.Sprintf("连续失败 %d 次", failures))
 			}
 		}
-		// 仅在已收到过 tracker 响应后才把“无 peers / 无下载者”当作问题，
+		// 仅在已收到过 tracker 响应后才把"无 peers"当作问题，
 		// 避免新调度但尚未完成首次上报的种子被误标为异常。
+		// 注意：仅有做种者、无下载者属于做种场景的正常状态（此时带宽权重为 0、
+		// 不会虚增上传），下载者数量在列表中有独立展示，不作为异常原因输出。
 		if hasResponse {
 			if stats.Seeders == 0 && stats.Leechers == 0 {
 				hasIssue = true
 				issueReasons = append(issueReasons, "无 peers 连接")
-			} else if stats.Leechers == 0 {
-				issueReasons = append(issueReasons, "无下载者")
 			}
 		}
 		issueReason := ""

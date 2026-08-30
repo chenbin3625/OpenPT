@@ -145,6 +145,11 @@ go build -o openpt ./cmd/openpt
 > 前端开发时可在 `frontend/` 目录运行 `npm run dev`，Vite 会启动本地开发服务器
 > 并代理到 OpenPT 的 API。发布版本直接使用内嵌产物，无需额外资源目录。
 
+> 说明：本地执行 `npm install` 后，`frontend/node_modules/flatted` 内附带一段 Go
+> 参考实现，会被 `go build ./...`、`go test ./...` 等按通配符执行的工具一并编译
+> （表现为 `openpt/frontend/node_modules/...` 包）。该目录已被 `.gitignore` 排除，
+> 不影响 CI 与发布产物，编译失败风险为零；如需规避，可在前端构建后再执行 Go 命令。
+
 ## 配置方法
 
 OpenPT 使用 TOML 配置文件。推荐从示例文件复制：
@@ -263,6 +268,8 @@ port = 51413
 proxy = "http://127.0.0.1:7890"
 ```
 
+留空表示直连 Tracker：`HTTP_PROXY` / `HTTPS_PROXY` 等环境变量不会影响 Tracker 上报流量，需要代理时请显式配置此项。
+
 代理仅用于 HTTP/HTTPS Tracker。配置代理后，UDP Tracker 会返回明确错误，调度器会继续尝试种子中的其它 Tracker。
 
 `failure_backoff_min_seconds` 和 `failure_backoff_max_seconds` 控制失败后的指数退避重试范围。
@@ -298,6 +305,8 @@ http://127.0.0.1:9090/healthz
 ```
 
 `GET` 和 `HEAD` 请求成功时返回 `200 OK`。Docker 镜像也使用此接口执行容器健康检查。
+`/healthz` 不随 `metrics.enabled` 关闭而消失：即使 `enabled = false`，程序仍会监听
+`metrics.listen` 并只提供该接口（`/metrics` 与 Web UI 停止服务），以保证容器健康检查始终可用。
 
 如果需要局域网访问，可将监听地址改成：
 

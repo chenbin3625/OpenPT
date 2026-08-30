@@ -34,6 +34,8 @@ func ParseResponse(data []byte) (Response, error) {
 	var r Response
 	r.Interval = intValue(dict["interval"])
 	r.MinInterval = intValue(dict["min interval"])
+	// 本工具始终以 left=0 做种上报，tracker 返回的 complete 计数包含自身，
+	// 因此减 1 得到"其它做种者"数量；用于展示与带宽权重分配。
 	r.Seeders = intValue(dict["complete"]) - 1
 	if r.Seeders < 0 {
 		r.Seeders = 0

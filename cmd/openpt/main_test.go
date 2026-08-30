@@ -124,3 +124,38 @@ func TestHealthEndpoint(t *testing.T) {
 		t.Fatalf("health response = status %d body %q", resp.StatusCode, body)
 	}
 }
+
+// TestHealthEndpointAvailableWhenMetricsDisabled 验证：metrics.enabled=false 时
+// /healthz 仍可用（容器 HEALTHCHECK 依赖它），而 /metrics 不再服务。
+func TestHealthEndpointAvailableWhenMetricsDisabled(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server, err := startMetricsServer(config.Config{
+		Metrics: config.MetricsConfig{Enabled: false, Listen: "127.0.0.1:0", Path: "/metrics"},
+	}, nil, nil, nil, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Shutdown(context.Background())
+
+	resp, err := http.Get("http://" + server.Addr + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || string(body) != "ok\n" {
+		t.Fatalf("health response with metrics disabled = status %d body %q", resp.StatusCode, body)
+	}
+
+	resp2, err := http.Get("http://" + server.Addr + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusNotFound {
+		t.Fatalf("metrics path with metrics disabled = %d, want 404", resp2.StatusCode)
+	}
+}

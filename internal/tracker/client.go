@@ -89,6 +89,11 @@ func newHTTPClient(opts Options) (*http.Client, func(), error) {
 			return nil, nil, err
 		}
 		tr.Proxy = http.ProxyURL(u)
+	} else {
+		// 显式禁用代理：DefaultTransport 默认读取 HTTP(S)_PROXY 环境变量，
+		// 会把 tracker 上报流量静默转发给环境代理；tracker.proxy 未配置时
+		// 应当直连，需要代理的用户应显式配置 tracker.proxy。
+		tr.Proxy = nil
 	}
 	tr.DisableKeepAlives = !opts.ReuseConnections
 	return &http.Client{Timeout: opts.Timeout, Transport: tr}, tr.CloseIdleConnections, nil

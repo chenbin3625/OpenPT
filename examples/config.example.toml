@@ -144,7 +144,9 @@ failure_backoff_max_seconds = 300
 
 # ========== 监控和日志配置 ==========
 [metrics]
-# 是否启用监控和 Web UI
+# 是否启用监控（/metrics）和 Web UI
+# 注意：/healthz 健康检查始终可用（容器 HEALTHCHECK 依赖它），
+# 即使 enabled = false，程序仍会监听 metrics.listen 并只提供该接口。
 enabled = true
 
 # 监控服务监听地址

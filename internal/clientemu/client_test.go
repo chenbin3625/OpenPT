@@ -246,6 +246,62 @@ func TestRandomPoolWithChecksum(t *testing.T) {
 	}
 }
 
+// TestKeyShouldUrlEncodeHonored 验证 keyGenerator.shouldUrlEncode 语义与
+// peerIdGenerator 一致：为 true 时按 urlEncoder 编码，未配置（false）时保持原样。
+func TestKeyShouldUrlEncodeHonored(t *testing.T) {
+	newKeyClient := func(shouldURLEncode *bool) *Client {
+		t.Helper()
+		keyGen := GeneratorConfig{
+			Algorithm: AlgorithmConfig{Type: "REGEX", Pattern: "[+]{4}"},
+			RefreshOn: "NEVER",
+		}
+		if shouldURLEncode != nil {
+			keyGen.ShouldURLEncode = *shouldURLEncode
+		}
+		c, err := NewClient(ClientConfig{
+			KeyGenerator: &keyGen,
+			PeerGenerator: GeneratorConfig{
+				Algorithm: AlgorithmConfig{Type: "REGEX", Pattern: "-AA0000-[A-Za-z0-9]{12}"},
+				RefreshOn: "NEVER",
+			},
+			URLEncoder: URLEncoder{EncodingExclusionPattern: "[A-Za-z0-9-]", EncodedHexCase: "lower"},
+			Query:      "info_hash={infohash}&peer_id={peerid}&port={port}&uploaded={uploaded}&downloaded={downloaded}&left={left}&key={key}&event={event}&numwant={numwant}",
+			Numwant:    1,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	render := func(c *Client) string {
+		t.Helper()
+		q, err := c.RenderQuery(RenderInput{
+			InfoHash: mustHex(t, "000102030405060708090a0b0c0d0e0f10111213"),
+			Port:     6881,
+			Event:    EventStarted,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return q
+	}
+
+	// 未配置 shouldUrlEncode（默认 false）：key 保持原样输出
+	if q := render(newKeyClient(nil)); !strings.Contains(q, "key=++++") {
+		t.Fatalf("default key encoding: query = %q, want raw key=++++", q)
+	}
+	// 显式 false：与默认一致
+	explicitFalse := false
+	explicitTrue := true
+	if q := render(newKeyClient(&explicitFalse)); !strings.Contains(q, "key=++++") {
+		t.Fatalf("explicit false key encoding: query = %q, want raw key=++++", q)
+	}
+	// true：'+' 编码为 %2B（EncodedHexCase 为 lower，输出小写十六进制）
+	if q := render(newKeyClient(&explicitTrue)); !strings.Contains(q, "key=%2b%2b%2b%2b") {
+		t.Fatalf("enabled key encoding: query = %q, want key=%%2b%%2b%%2b%%2b", q)
+	}
+}
+
 type errReader struct{}
 
 func (errReader) Read(_ []byte) (int, error) {
