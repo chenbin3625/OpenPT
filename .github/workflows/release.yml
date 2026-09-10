@@ -62,7 +62,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download frontend dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: openpt-dist
 
@@ -133,7 +133,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download frontend dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: openpt-dist
 
@@ -192,7 +192,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: dist-*
