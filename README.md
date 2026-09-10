@@ -4,6 +4,8 @@
 
 <h1 align="center">OpenPT</h1>
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/chenbin3625/OpenPT)](https://github.com/chenbin3625/OpenPT/releases) [![Docker Pulls](https://img.shields.io/docker/pulls/chenbin3625/openpt)](https://hub.docker.com/r/chenbin3625/openpt)
+
 OpenPT is a lightweight, configuration-driven BitTorrent Tracker announce tool aimed at private tracker (PT) seeding scenarios. It only needs `.torrent` files and does not require downloading the real content; it simulates a client periodically reporting seeding status, uploaded amount, port, client identity and other information to the Tracker.
 
 OpenPT has a built-in Web UI that shows active torrents, upload speed, share ratio, Tracker status, last announce time, next announce time and error details in real time. The default configuration generates a random announce port on every startup, avoiding continued use of common fixed default ports.
