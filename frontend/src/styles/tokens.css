@@ -1,0 +1,73 @@
+/* 设计变量：颜色 / 圆角 / 阴影，两套主题通过 [data-theme] 切换。 */
+:root {
+    --page-width: 1680px;
+
+    --bg: #f4f6f9;
+    --surface: #ffffff;
+    --surface-2: #f8fafc;
+    --surface-3: #eef1f6;
+    --border: #e4e8ef;
+    --border-2: #d5dbe5;
+
+    --text: #101828;
+    --text-2: #4d5a70;
+    --text-3: #8b97ab;
+
+    --primary: #2563eb;
+    --primary-bg: #eef4ff;
+    --primary-ring: rgba(37, 99, 235, 0.35);
+    --success: #0e9f6e;
+    --success-bg: #e6f8f1;
+    --warning: #b06d06;
+    --warning-bg: #fdf4e5;
+    --danger: #d92d20;
+    --danger-bg: #fef3f2;
+    --danger-border: #fbd5d1;
+    --info: #2b7fd4;
+    --info-bg: #edf5fd;
+
+    --radius-sm: 6px;
+    --radius: 8px;
+    --radius-lg: 12px;
+    --radius-pill: 999px;
+
+    --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05), 0 1px 3px rgba(16, 24, 40, 0.04);
+    --shadow-md: 0 4px 12px rgba(16, 24, 40, 0.08), 0 2px 4px rgba(16, 24, 40, 0.04);
+    --shadow-lg: 0 12px 32px rgba(16, 24, 40, 0.14), 0 4px 8px rgba(16, 24, 40, 0.06);
+
+    --overlay: rgba(16, 24, 40, 0.42);
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+        "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+[data-theme="dark"] {
+    --bg: #0a0f1c;
+    --surface: #121a2a;
+    --surface-2: #0f1626;
+    --surface-3: #1c2637;
+    --border: #232e44;
+    --border-2: #2e3b55;
+
+    --text: #e8edf7;
+    --text-2: #a3b0c7;
+    --text-3: #75839c;
+
+    --primary: #6f9bff;
+    --primary-bg: rgba(59, 110, 246, 0.16);
+    --primary-ring: rgba(111, 155, 255, 0.4);
+    --success: #34d399;
+    --success-bg: rgba(16, 185, 129, 0.14);
+    --warning: #f2b23c;
+    --warning-bg: rgba(245, 158, 11, 0.14);
+    --danger: #fb7185;
+    --danger-bg: rgba(225, 29, 72, 0.14);
+    --danger-border: rgba(251, 113, 133, 0.28);
+    --info: #6aa8ff;
+    --info-bg: rgba(59, 130, 246, 0.14);
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
+    --overlay: rgba(3, 7, 18, 0.62);
+}

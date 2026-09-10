@@ -1,4 +1,4 @@
-# ---- 前端构建（Vite + React + antd，产物输出到 ../internal/web/dist）----
+# ---- 前端构建（原生 HTML/CSS/JS，零依赖；产物输出到 ../internal/web/dist）----
 FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./

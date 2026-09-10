@@ -1,0 +1,196 @@
+.app {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ---------- 顶栏 ---------- */
+.app-header {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    padding: 8px 24px;
+    background: color-mix(in srgb, var(--surface) 86%, transparent);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border);
+}
+
+.app-header-inner {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    max-width: var(--page-width);
+    margin: 0 auto;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex: 0 0 auto;
+}
+
+.brand-icon {
+    border-radius: var(--radius);
+    box-shadow: 0 2px 8px var(--primary-ring);
+}
+
+.brand-name {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 55%, #7c5cf0));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+
+/* ---------- 指标带 ---------- */
+.stats {
+    display: flex;
+    align-items: center;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.stats::-webkit-scrollbar {
+    display: none;
+}
+
+.stat {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 14px;
+    white-space: nowrap;
+}
+
+.stat + .stat {
+    border-left: 1px solid var(--border);
+}
+
+.stat-icon {
+    display: grid;
+    place-items: center;
+    width: 27px;
+    height: 27px;
+    border-radius: var(--radius-sm);
+    flex: 0 0 auto;
+}
+
+.stat-icon.tone-primary { background: var(--primary-bg); }
+.stat-icon.tone-success { background: var(--success-bg); }
+.stat-icon.tone-warning { background: var(--warning-bg); }
+.stat-icon.tone-info { background: var(--info-bg); }
+.stat-icon.tone-danger { background: var(--danger-bg); }
+.stat-icon.tone-muted { background: var(--surface-3); }
+
+.stat-dot-wrap {
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 27px;
+}
+
+.stat-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.25;
+}
+
+.stat-label {
+    font-size: 11px;
+    color: var(--text-3);
+}
+
+.stat-value {
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 连接状态呼吸灯 */
+.status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--success);
+}
+
+.status-dot.connected {
+    box-shadow: 0 0 0 3px var(--success-bg);
+}
+
+.status-dot.connecting {
+    background: var(--info);
+    animation: pulse-dot 1.8s ease-out infinite;
+}
+
+.status-dot.reconnecting {
+    background: var(--warning);
+    animation: pulse-dot 1.2s ease-out infinite;
+}
+
+@keyframes pulse-dot {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); }
+    70% { box-shadow: 0 0 0 6px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.app-main {
+    flex: 1;
+    width: 100%;
+    max-width: var(--page-width);
+    margin: 0 auto;
+    padding: 16px 24px 32px;
+}
+
+@media (max-width: 1100px) {
+    .app-header-inner {
+        flex-wrap: wrap;
+    }
+
+    .stats {
+        order: 3;
+        width: 100%;
+        padding-bottom: 2px;
+    }
+
+    .header-actions {
+        order: 2;
+    }
+}
+
+@media (max-width: 768px) {
+    .app-header {
+        position: static;
+        padding: 8px 14px;
+    }
+
+    .app-main {
+        padding: 12px 14px 24px;
+    }
+
+    .stat {
+        padding: 3px 10px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
