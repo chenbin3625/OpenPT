@@ -1,16 +1,380 @@
 <p align="center">
-  <img src="internal/web/openpt-icon.svg" width="104" alt="OpenPT 图标">
+  <img src="internal/web/openpt-icon.svg" width="104" alt="OpenPT logo">
 </p>
 
 <h1 align="center">OpenPT</h1>
 
+OpenPT is a lightweight, configuration-driven BitTorrent Tracker announce tool aimed at private tracker (PT) seeding scenarios. It only needs `.torrent` files and does not require downloading the real content; it simulates a client periodically reporting seeding status, uploaded amount, port, client identity and other information to the Tracker.
+
+OpenPT has a built-in Web UI that shows active torrents, upload speed, share ratio, Tracker status, last announce time, next announce time and error details in real time. The default configuration generates a random announce port on every startup, avoiding continued use of common fixed default ports.
+
+## Key Features
+
+- Automatically scans the `torrents` directory and loads `.torrent` files
+- Limits the number of simultaneous seeds according to the configuration
+- Supports client spoofing files for qBittorrent, Transmission, Deluge, uTorrent and others
+- Supports three upload strategies: no accumulated upload, conservative rate, and custom rate
+- Dynamically allocates upload speed based on the peers returned by the Tracker
+- Supports a target share ratio, automatically stopping that torrent once it is reached
+- Automatically retries with exponential backoff after a Tracker request fails
+- Supports HTTP, HTTPS and UDP Trackers
+- Supports BitTorrent v1, hybrid and v2-only torrent info hashes
+- Automatically archives corrupted or unparsable torrent files, avoiding repeated load failures
+- Persists accumulated upload and completed status, so it can keep running after a restart
+- Automatically sends a `stopped` announce and releases the slot when a torrent file is deleted
+- Web UI shows status, error details and the current configuration in real time
+- Exposes Prometheus-format metrics and a health check endpoint
+- Supports hot reloading of part of the configuration via `SIGHUP`
+
+## Quick Start
+
+### Running Locally
+
+1. Prepare the program files and the configuration file:
+
+```sh
+cp examples/config.example.toml config.toml
+```
+
+2. Edit `config.toml`:
+
+```sh
+nano config.toml
+```
+
+3. Create the torrent directory and put `.torrent` files in it:
+
+```sh
+mkdir -p torrents
+```
+
+4. Start OpenPT:
+
+```sh
+./openpt --config config.toml
+```
+
+5. Open the Web UI:
+
+```text
+http://127.0.0.1:9090
+```
+
+### Running with Docker
+
+Create `compose.yml`:
+
+```yaml
+services:
+  openpt:
+    image: chenbin3625/openpt:latest
+    container_name: openpt
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+    volumes:
+      - ./data:/data
+```
+
+If the current user on the host machine is not `1000:1000`, first check the actual UID/GID:
+
+```sh
+id -u
+id -g
+```
+
+Then change `PUID` and `PGID` to the corresponding values. OpenPT will run as this user, which makes it easier to read `.torrent` files bind-mounted in. The container does not modify the ownership of directories or files that already exist on the host at startup.
+
+Start it:
+
+```sh
+docker compose up -d
+```
+
+Put `.torrent` files into:
+
+```text
+./data/torrents
+```
+
+If existing files produce `permission denied`, make sure they are readable and writable by the user corresponding to `PUID/PGID`. For example, to check permissions only:
+
+```sh
+ls -ld ./data ./data/torrents ./data/torrents_archive
+ls -l ./data/torrents
+```
+
+Restart the container after changing the configuration:
+
+```sh
+docker compose restart
+```
+
+## Building from Source
+
+The Web UI is built with Vite + React + antd, and the build output is embedded into the binary via `go:embed`.
+
+**The embedded frontend output (`internal/web/dist/`) is committed to the repository**, so after a fresh clone you can run
+`go build` / `go test` directly, without building the frontend manually first:
+
+```sh
+go build -o openpt ./cmd/openpt
+```
+
+Only after modifying `frontend/src/**` do you need to rebuild the frontend output (output to `internal/web/dist`,
+and committed together with the change, keeping it in sync with the source):
+
+```sh
+# 1. Build the frontend (output to internal/web/dist)
+cd frontend
+npm ci
+npm run build
+cd ..
+
+# 2. Build the Go binary (with the embedded frontend output)
+go build -o openpt ./cmd/openpt
+```
+
+> For frontend development, you can run `npm run dev` in the `frontend/` directory; Vite starts a local dev server
+> and proxies to the OpenPT API. Release builds use the embedded output directly, with no extra asset directory needed.
+
+> Note: after running `npm install` locally, `frontend/node_modules/flatted` ships with a Go
+> reference implementation, which gets compiled by wildcard-driven tools such as `go build ./...` and `go test ./...`
+> (showing up as `openpt/frontend/node_modules/...` packages). That directory is excluded by `.gitignore`,
+> so it does not affect CI or release artifacts, and the risk of a build failure is zero; if you want to avoid it, run the Go commands after building the frontend.
+
+## Configuration
+
+OpenPT uses a TOML configuration file. It is recommended to copy it from the example file:
+
+```sh
+cp examples/config.example.toml config.toml
+```
+
+A commonly used configuration example:
+
+```toml
+simultaneous_seed = 200
+client = "qbittorrent-5.1.4.client"
+torrents_dir = "./torrents"
+clients_dir = "./clients"
+scan_interval_seconds = 5
+shutdown_stop_timeout_seconds = 20
+
+[uploaded]
+strategy = "configured_rate"
+configured_rate_bps = 170000
+# Set to 0 when you do not want a separate fluctuation range: random_jitter_percent generates one around configured_rate_bps
+min_rate_bps = 0
+max_rate_bps = 0
+conservative_rate_bps = 1024
+random_jitter_percent = 10
+random_refresh_seconds = 1200
+ratio_target = 0
+
+[announce]
+port = 0
+ip = ""
+ipv6 = ""
+
+[tracker]
+timeout_seconds = 15
+proxy = ""
+reuse_connections = true
+max_idle_conns = 100
+max_idle_conns_per_host = 10
+idle_conn_timeout_seconds = 90
+failure_backoff_min_seconds = 5
+failure_backoff_max_seconds = 300
+
+[metrics]
+enabled = true
+listen = "127.0.0.1:9090"
+path = "/metrics"
+webui = true
+
+[logging]
+file = ""
+```
+
+### Core Configuration
+
+`simultaneous_seed`: number of simultaneous seeds. Setting it to `0` means no limit, and OpenPT will try to load all torrents in the directory.
+
+`client`: the client spoofing file name, which must exist in the `clients_dir` directory.
+
+`torrents_dir`: the torrent file directory; OpenPT scans the `.torrent` files here.
+
+`clients_dir`: the client spoofing configuration directory.
+
+`archive_dir`: the archive directory for problematic torrents. Corrupted or unparsable `.torrent` files are moved here once the write is confirmed complete; files with the same name are not overwritten.
+
+`state_file`: the state persistence file, which stores accumulated upload and the status of torrents that have reached the target share ratio.
+
+`scan_interval_seconds`: the interval for scanning the torrent directory.
+
+`shutdown_stop_timeout_seconds`: the longest time to wait for the `stopped` announce to complete on exit.
+
+### Announce Configuration
+
+`announce.port` is recommended to be set to `0` by default:
+
+```toml
+[announce]
+port = 0
+```
+
+When the port is `0` or not configured, OpenPT generates a random dynamic port between `49152-65535` on every startup. This avoids using common default ports such as `6881`.
+
+If you really need a fixed port, you can set it to a specific value between `1-65535`:
+
+```toml
+[announce]
+port = 51413
+```
+
+`announce.ip` and `announce.ipv6` can be left empty by default, letting the Tracker detect the address automatically.
+
+### Upload Strategies
+
+`uploaded.strategy` supports three modes:
+
+- `none`: no accumulated upload, the most conservative
+- `conservative_rate`: use a low-rate conservative upload
+- `configured_rate`: use a custom upload rate
+
+Common rate conversions:
+
+- `100 KB/s` = `102400`
+- `500 KB/s` = `512000`
+- `1 MB/s` = `1048576`
+
+`ratio_target` is the target share ratio. Setting it to `0` means never stopping because of the share ratio; setting it to `2.0` means stopping that torrent after reaching a 2.0 share ratio.
+
+### Tracker Configuration
+
+`tracker.timeout_seconds`: the Tracker request timeout.
+
+`tracker.proxy`: the proxy address, which may be empty. HTTP proxies and SOCKS5 proxies are supported, for example:
+
+```toml
+proxy = "http://127.0.0.1:7890"
+```
+
+Leaving it empty means connecting to the Tracker directly: environment variables such as `HTTP_PROXY` / `HTTPS_PROXY` do not affect Tracker announce traffic, so configure this option explicitly when a proxy is needed.
+
+The proxy is only used for HTTP/HTTPS Trackers. After a proxy is configured, UDP Trackers return a clear error, and the scheduler keeps trying other Trackers in the torrent.
+
+`failure_backoff_min_seconds` and `failure_backoff_max_seconds` control the exponential backoff retry range after a failure.
+
+### Web UI and Metrics
+
+Enable the Web UI:
+
+```toml
+[metrics]
+enabled = true
+listen = "127.0.0.1:9090"
+path = "/metrics"
+webui = true
+```
+
+Access address:
+
+```text
+http://127.0.0.1:9090
+```
+
+Prometheus metrics address:
+
+```text
+http://127.0.0.1:9090/metrics
+```
+
+The health check address is always:
+
+```text
+http://127.0.0.1:9090/healthz
+```
+
+`GET` and `HEAD` requests return `200 OK` on success. The Docker image also uses this endpoint to run container health checks.
+`/healthz` does not disappear when `metrics.enabled` is turned off: even with `enabled = false`, the program still listens on
+`metrics.listen` and serves only that endpoint (`/metrics` and the Web UI stop being served), so that container health checks remain available at all times.
+
+If you need LAN access, you can change the listen address to:
+
+```toml
+listen = "0.0.0.0:9090"
+```
+
+## Using the Web UI
+
+The Web UI shows in real time:
+
+- Number of active torrents
+- Number of abnormal torrents
+- Current upload speed
+- Total uploaded
+- Next announce time
+- Size, uploaded, speed, peers and share ratio of each torrent
+- Last announce time, next announce time, announce interval
+- Tracker host and Tracker switch index
+- Status and error details
+
+You can sort by column, filter by status, and search by name or Tracker. Hovering over the status column shows the full error message, announce time, Tracker, peers and other context.
+
+## Hot Reload
+
+Sending `SIGHUP` hot reloads part of the configuration:
+
+```sh
+kill -HUP $(pidof openpt)
+```
+
+Hot reloadable:
+
+- Number of simultaneous seeds
+- Upload strategy and rate
+- Share ratio target
+- Timeout for waiting for the `stopped` announce on shutdown
+- Announce port, IP and IPv6
+- Tracker timeout, proxy and backoff configuration
+
+When `announce.port = 0`, hot reload keeps using the port generated when this process started, and does not randomize again because of `SIGHUP`.
+
+Require a restart to take effect:
+
+- Client spoofing files
+- Torrent directory
+- Problematic torrent archive directory
+- Client configuration directory
+- State file
+- Torrent scan interval
+- Log file
+- Metrics service switch, listen address, metrics path and Web UI switch
+
+## Usage Tips
+
+- OpenPT does not need real files, only `.torrent` files.
+- OpenPT does not actually upload data; it only reports upload numbers to the Tracker.
+- The default `announce.port = 0` randomizes the port at startup; set a specific value manually if you need a fixed port.
+- It is recommended to start with a more conservative upload strategy, and adjust the rate after confirming the site behaves normally.
+- HTTP, HTTPS and UDP Trackers are supported; when a proxy is configured, UDP Trackers report a clear error and switch to other Trackers.
+
+## License
+
+This project is released under the [MIT License](LICENSE).
+
+---
+
+# 中文
+
 OpenPT 是一个轻量级、配置驱动的 BitTorrent Tracker Announce 工具，面向 PT 站保种场景。它只需要 `.torrent` 文件，不需要真实下载内容，通过模拟客户端向 Tracker 定期汇报做种状态、上传量、端口、客户端标识等信息。
 
 OpenPT 内置 Web UI，可实时查看活跃种子、上传速度、分享率、Tracker 状态、上次上报时间、下次上报时间和错误详情。默认配置会在每次启动时随机生成 Announce 端口，避免继续使用常见的固定默认端口。
-
-**English Summary**
-
-OpenPT is a lightweight, configuration-driven BitTorrent tracker announce tool for private tracker seeding workflows. It works with `.torrent` files only, simulates client announce requests, exposes a Web UI and Prometheus metrics, and does not require downloading the real content.
 
 ## 主要功能
 
