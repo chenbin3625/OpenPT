@@ -125,13 +125,11 @@ jobs:
             echo "::endgroup::"
           done
 
+      # 直接用仓库自己的工具链扫描。golang/govulncheck-action 固定使用自带的
+      # stable Go（go-version-file 会被 setup-go 忽略），会掩盖 go.mod 工具链
+      # 标准库里的漏洞，而且还会多做一次 checkout。
       - name: Vulnerability scan
-        uses: golang/govulncheck-action@v1
-        with:
-          # 不加这三个参数时该 action 会用自带的 stable Go 重新 checkout 一次仓库，
-          # 与 go.mod 声明的工具链不一致。
-          go-version-file: go.mod
-          repo-checkout: false
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   binaries:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}${{ matrix.goarm && format('/v{0}', matrix.goarm) || '' }}
