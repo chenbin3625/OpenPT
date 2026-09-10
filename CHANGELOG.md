@@ -2,6 +2,43 @@
 
 本项目以 Git tag 发布版本。每次发布都会在 GitHub Release 中附上对应说明。
 
+## v0.3.0 - 2026-09-10
+
+本版为 Web UI 全量重构：移除前端全部依赖并以原生实现重写，功能与配置保持不变。
+后端、配置格式与 HTTP API 未改动，升级只需替换二进制或镜像。
+
+### Web UI
+
+- **移除全部前端依赖**：`react` / `react-dom` / `antd` / `@ant-design/icons` / `dayjs` 五个运行时依赖，以及 `vite` / `@vitejs/plugin-react` 两个构建依赖全部去掉，`package.json` 不再有 `dependencies` 与 `devDependencies`；改为原生 HTML/CSS/JavaScript 实现。`npm ci` 不再安装任何包，保留 lockfile 仅为让 CI 能缓存与校验
+- **产物从 5 个文件 1058 KB 降到 2 个文件 82 KB**：`vendor-antd`（1024 KB）等 chunk 不再存在，首屏只需 1 个 JS + 1 个 CSS
+- **构建与开发脚本自带，仅依赖 Node 标准库**：`scripts/build.js` 解析 ES 模块依赖图拼成单文件 IIFE、内联 CSS `@import`、按内容哈希命名产物并填充 `index.html` 占位符，构建结束跑一遍 `node --check`；`scripts/serve.js` 提供开发服务器（直接以原生 ES 模块提供 `src/`，改完刷新即可，无需构建）与 `--preview` 模式，两者都把 `/api/*` 代理到后端
+- **四类错误在构建期即失败**：引入 npm 裸模块、具名导入在目标模块中并不存在、使用 `export default` / `export {…}`、跨模块顶层标识符重名。扁平拼接让所有模块共享作用域，这些问题否则只会在运行时才暴露
+- 源码结构划分为 `src/lib`（dom / format / store / api / theme / clipboard）与 `src/ui`（各部件，以及自行实现的 tooltip、popover、drawer、toast、分段筛选、分页、进度条），样式为 7 个文件的 token 体系，支持亮/暗两套主题
+
+### 修复
+
+- **复制在 http 部署下不再静默失败**：旧实现直接调用 `navigator.clipboard`，该 API 仅在安全上下文（https / localhost）可用，而本面板通常以 http 形式部署在内网，复制 InfoHash 与错误信息实际无效且没有任何反馈。现增加 `execCommand` 兜底路径，并按结果给出成功/失败提示
+- **SSE 推送不再重建表格行**：改为按 `info_hash` 复用行元素、只更新变化的文本与状态类，悬浮详情卡片与 tooltip 在数据刷新时不会再被打断
+- **相对时间按秒自刷新**：SSE 在数据无变化时会退避到最长 15 秒推送一次，此前"下次上报"等相对时间在空闲期会看起来停滞
+
+### 界面
+
+- 功能与旧版一致：SSE 实时状态、顶栏六项指标（活跃 / 异常 / 上传速率 / 总上传量 / 下次上报 / 连接状态）、10 列种子表格与排序、四个状态筛选、防抖搜索、分页（10/20/50/100 与快速跳转）、异常行高亮、状态悬浮详情与错误复制、运行时配置抽屉（分组只读视图）、亮 / 暗 / 跟随系统主题
+- 样式与布局重做：吸顶玻璃质感顶栏搭配指标带、单卡片内联工具栏、表头小写字距、异常行左侧强调条；窄屏下 Tracker 地址与 Info Hash 列自动隐藏，页面本身不产生横向滚动
+
+### 验证
+
+- 无头 Chrome 经 CDP 对**构建产物**与**开发服务器源码**两条路径各跑 25 项断言（渲染、数值格式化、状态筛选、搜索防抖、三段排序循环、分页、悬浮卡片内容、主题切换、抽屉加载、ESC 关闭），均 25/25，控制台无报错与未捕获异常
+- 另外单独确认：真实点击下复制成功、SSE 刷新时行元素保持同一引用、相对时间随本地时钟跳动、后端断开 1 秒内转入"正在重连"、760px 窄屏无横向溢出
+- 重新构建并入库 Web UI 静态资源（`internal/web/dist`），重复构建哈希稳定
+
+### 文档
+
+- README 更新前端技术栈说明与开发方式（`npm run dev` / `npm run preview` / `OPENPT_BACKEND`），移除已不适用的 `node_modules/flatted` 注意事项
+- Dockerfile 前端构建阶段注释同步
+
+版本号 frontend/package.json -> 0.3.0
+
 ## v0.2.7 - 2026-09-10
 
 本版为 Web UI 依赖升级，无功能与配置变更。
