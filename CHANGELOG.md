@@ -2,6 +2,18 @@
 
 本项目以 Git tag 发布版本。每次发布都会在 GitHub Release 中附上对应说明。
 
+## v0.2.7 - 2026-09-10
+
+本版为 Web UI 依赖升级，无功能与配置变更。
+
+### Web UI
+- **React 升级到 19**：`react` / `react-dom` 18.3 → 19.0，`antd` 5.21 → 6.6，`@ant-design/icons` 5.4 → 6.3（antd 6 的 peer 要求 React 19，三者需同步升级）
+- **构建工具链升级到 Vite 8 / @vitejs/plugin-react 6**：产物改为 Rolldown 输出，构建更快
+- 升级前后逐项对照过界面表现：仪表盘（统计条、种子列表、筛选、搜索）、配置抽屉（含滚动到底部的全部配置段）、表格数据行（状态标签、进度条、分页、实时重试计数）、状态卡片 Popover、`App.useApp()` 消息提示、暗色模式与 Tooltip，渲染一致；浏览器控制台无报错。antd 6 内部类名有调整（`.ant-popover-inner` → `.ant-popover-container`），但本项目自定义 CSS 仅依赖 `.ant-card-head` / `.ant-card-head-title` / `.ant-card-extra` / `.ant-segmented-item-selected` / `.ant-table-tbody`，这些在 v6 中均保留
+- 重新构建并入库 Web UI 静态资源（internal/web/dist）
+
+版本号 frontend/package.json -> 0.2.7
+
 ## v0.2.6 - 2026-09-10
 
 本版无功能变更，集中于依赖安全与发布流程本身。
