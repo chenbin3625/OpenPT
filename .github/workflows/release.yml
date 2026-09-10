@@ -70,7 +70,7 @@ jobs:
         run: tar -xzf openpt-dist.tar.gz -C internal/web
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -141,7 +141,7 @@ jobs:
         run: tar -xzf openpt-dist.tar.gz -C internal/web
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
