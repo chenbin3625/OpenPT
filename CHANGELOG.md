@@ -2,6 +2,28 @@
 
 本项目以 Git tag 发布版本。每次发布都会在 GitHub Release 中附上对应说明。
 
+## v0.2.6 - 2026-09-10
+
+本版无功能变更，集中于依赖安全与发布流程本身。
+
+### 安全
+- **Go 工具链升级到 1.26.6**：用仓库自身工具链执行 `govulncheck` 时发现 5 个**可达**的标准库漏洞（net/http、crypto/tls、net/url、encoding/asn1），均在 1.26.6 修复；`go.mod` 与 Docker 构建镜像（golang:1.26.6-alpine）同步升级，发布的二进制不再携带这些漏洞
+- **漏洞扫描与构建工具链对齐**：此前 `golang/govulncheck-action` 固定使用自带的 stable Go 并忽略 `go-version-file`，扫描的工具链与实际发布二进制所用的并不一致，标准库漏洞因此被掩盖
+
+### 发布流程
+- **发布产物附带 sha256 校验**：15 个平台的 tar.gz/zip 都生成同名 `.sha256` 并随 Release 一并发布
+- **交叉编译冒烟纳入 CI**：15 个发布平台在每次 CI 都会交叉编译一遍，平台相关问题不再拖到打 tag 时才暴露，也不会让整次发布因单个平台失败而卡住
+- **预发布不再覆盖 latest**：`v0.3.0-rc1` 这类预发布 tag 不再生成 `latest` 与次版本别名
+- **Docker Hub secret 缺失直接失败**：此前只打 warning 并跳过推送，tag 发了但镜像没发、流水线仍是绿灯
+- 解包前端产物前先清空 `internal/web/dist`，避免旧 hash 文件被 `go:embed` 打进二进制
+- 权限最小化（`contents: write` 仅限发布 job）、增加并发控制与 job 超时
+
+### 依赖与构建
+- 前端构建工具链升级到 Vite 8 / @vitejs/plugin-react 6
+- 重新构建并入库 Web UI 静态资源（internal/web/dist）
+
+版本号 frontend/package.json -> 0.2.6
+
 ## v0.2.4 - 2026-08-30
 
 ### 正确性与健壮性
