@@ -14,7 +14,7 @@ permissions:
 env:
   IMAGE_NAME: chenbin3625/openpt
   README_FILE: .dockerhub/README.md
-  SHORT_DESCRIPTION: "BitTorrent tracker announce tool for private trackers | 面向 PT 保种的 BitTorrent Tracker Announce 工具"
+  SHORT_DESCRIPTION: "BitTorrent tracker announce tool | 面向 PT 保种的 Tracker 工具"
 
 jobs:
   update:
