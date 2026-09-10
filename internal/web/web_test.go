@@ -99,7 +99,7 @@ func TestIndexServesBuiltApp(t *testing.T) {
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, `<div id="root">`) {
-		t.Fatal("index.html does not contain the React root element")
+		t.Fatal("index.html does not contain the app root element")
 	}
 	if !strings.Contains(body, "assets/") {
 		t.Fatal("index.html does not reference built assets")

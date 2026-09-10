@@ -3,20 +3,13 @@
   "private": true,
   "version": "0.2.7",
   "type": "module",
+  "description": "OpenPT 监控面板：零运行时依赖的原生 Web UI",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "@ant-design/icons": "^6.3.4",
-    "antd": "^6.6.1",
-    "dayjs": "^1.11.13",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^6.1.1",
-    "vite": "^8.0.0"
+    "dev": "node scripts/serve.js",
+    "build": "node scripts/build.js",
+    "preview": "node scripts/serve.js --preview"
   }
 }

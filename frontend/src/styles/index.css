@@ -1,0 +1,7 @@
+/* 样式入口：开发模式下浏览器按 @import 逐个加载，构建时由 scripts/build.js 内联合并。 */
+@import './tokens.css';
+@import './base.css';
+@import './layout.css';
+@import './controls.css';
+@import './table.css';
+@import './overlay.css';

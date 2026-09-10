@@ -117,7 +117,8 @@ docker compose restart
 
 ## Building from Source
 
-The Web UI is built with Vite + React + antd, and the build output is embedded into the binary via `go:embed`.
+The Web UI is plain HTML/CSS/JavaScript with **zero runtime and build dependencies** (no framework, no bundler —
+`frontend/scripts/build.js` runs on Node's standard library alone). The build output is embedded into the binary via `go:embed`.
 
 **The embedded frontend output (`internal/web/dist/`) is committed to the repository**, so after a fresh clone you can run
 `go build` / `go test` directly, without building the frontend manually first:
@@ -140,13 +141,13 @@ cd ..
 go build -o openpt ./cmd/openpt
 ```
 
-> For frontend development, you can run `npm run dev` in the `frontend/` directory; Vite starts a local dev server
-> and proxies to the OpenPT API. Release builds use the embedded output directly, with no extra asset directory needed.
+> For frontend development, run `npm run dev` in the `frontend/` directory: it starts a small Node dev server that
+> serves `src/` as native ES modules (no build step, just refresh) and proxies `/api/*` to the OpenPT backend at
+> `127.0.0.1:9090` (override with `OPENPT_BACKEND`). `npm run preview` serves the built output the same way.
+> Release builds use the embedded output directly, with no extra asset directory needed.
 
-> Note: after running `npm install` locally, `frontend/node_modules/flatted` ships with a Go
-> reference implementation, which gets compiled by wildcard-driven tools such as `go build ./...` and `go test ./...`
-> (showing up as `openpt/frontend/node_modules/...` packages). That directory is excluded by `.gitignore`,
-> so it does not affect CI or release artifacts, and the risk of a build failure is zero; if you want to avoid it, run the Go commands after building the frontend.
+> Note: `npm ci` installs nothing (the frontend has no dependencies) — it only exists so CI can cache and verify the
+> lockfile. Node 20+ is required for the build and dev scripts.
 
 ## Configuration
 
@@ -485,7 +486,8 @@ docker compose restart
 
 ## 从源码构建
 
-Web UI 使用 Vite + React + antd 构建，产物通过 `go:embed` 内嵌进二进制。
+Web UI 为原生 HTML/CSS/JavaScript，**零运行时依赖、零构建依赖**（无框架、无打包器，`frontend/scripts/build.js`
+仅使用 Node 标准库）。产物通过 `go:embed` 内嵌进二进制。
 
 **内嵌前端产物（`internal/web/dist/`）已随仓库入库**，因此全新 clone 后可直接
 `go build` / `go test`，无需先手动构建前端：
@@ -508,13 +510,13 @@ cd ..
 go build -o openpt ./cmd/openpt
 ```
 
-> 前端开发时可在 `frontend/` 目录运行 `npm run dev`，Vite 会启动本地开发服务器
-> 并代理到 OpenPT 的 API。发布版本直接使用内嵌产物，无需额外资源目录。
+> 前端开发时在 `frontend/` 目录运行 `npm run dev`：会启动一个 Node 小型开发服务器，
+> 直接以原生 ES 模块提供 `src/`（改完刷新即可，无需构建），并把 `/api/*` 代理到
+> `127.0.0.1:9090` 的后端（可用 `OPENPT_BACKEND` 覆盖）。`npm run preview` 以同样方式提供构建产物。
+> 发布版本直接使用内嵌产物，无需额外资源目录。
 
-> 说明：本地执行 `npm install` 后，`frontend/node_modules/flatted` 内附带一段 Go
-> 参考实现，会被 `go build ./...`、`go test ./...` 等按通配符执行的工具一并编译
-> （表现为 `openpt/frontend/node_modules/...` 包）。该目录已被 `.gitignore` 排除，
-> 不影响 CI 与发布产物，编译失败风险为零；如需规避，可在前端构建后再执行 Go 命令。
+> 说明：前端没有任何依赖，`npm ci` 实际不安装任何包，保留 lockfile 只是为了让 CI 能缓存与校验。
+> 构建与开发脚本需要 Node 20+。
 
 ## 配置方法
 

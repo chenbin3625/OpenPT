@@ -1,0 +1,353 @@
+/* ---------- 卡片 ---------- */
+.card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+
+.card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border);
+}
+
+.card-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.card-title h2 {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* ---------- 表格 ---------- */
+.table-scroll {
+    overflow-x: auto;
+}
+
+.table {
+    width: 100%;
+    min-width: 1180px;
+    border-collapse: collapse;
+}
+
+.table th {
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    color: var(--text-3);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-align: left;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.th-inner {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.table th.num .th-inner {
+    justify-content: flex-end;
+}
+
+.table th.is-sortable {
+    cursor: pointer;
+}
+
+.table th.is-sortable:hover {
+    color: var(--text);
+}
+
+.sort-caret {
+    opacity: 0;
+    transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.table th.is-sortable:hover .sort-caret {
+    opacity: 0.45;
+}
+
+.table th.is-sorted {
+    color: var(--primary);
+}
+
+.table th.is-sorted .sort-caret {
+    opacity: 1;
+}
+
+.table th.is-desc .sort-caret {
+    transform: rotate(180deg);
+}
+
+.table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+
+.table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.table tbody tr {
+    transition: background-color 0.12s ease;
+}
+
+.table tbody tr:hover td {
+    background: var(--surface-2);
+}
+
+/* 异常行：淡色底 + 左侧强调条 */
+.table tbody tr.is-issue td {
+    background: var(--danger-bg);
+}
+
+.table tbody tr.is-issue:hover td {
+    background: color-mix(in srgb, var(--danger-bg) 70%, var(--danger));
+}
+
+.table tbody tr.is-issue td:first-child {
+    box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.table .num {
+    text-align: right;
+}
+
+/* 列宽：数值列固定，名称列吸收剩余空间 */
+.col-name { min-width: 260px; }
+.col-status { width: 130px; }
+.col-speed { width: 118px; }
+.col-num { width: 108px; }
+.col-peers { width: 104px; }
+.col-ratio { width: 138px; }
+.col-time { width: 148px; }
+.col-tracker { width: 176px; }
+.col-hash { width: 148px; }
+
+@media (max-width: 992px) {
+    .col-hash { display: none; }
+    .table { min-width: 1040px; }
+}
+
+@media (max-width: 768px) {
+    .col-tracker { display: none; }
+    .table { min-width: 880px; }
+}
+
+/* ---------- 单元格内容 ---------- */
+.name {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.name-main {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+
+.name-sub {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+}
+
+.stack, .stack-end {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.stack-end {
+    align-items: flex-end;
+}
+
+.stack {
+    align-items: flex-start;
+    min-width: 0;
+}
+
+.sub {
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.speed {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.ratio {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 7px;
+}
+
+.ratio-bar {
+    position: relative;
+    width: 46px;
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-3);
+    overflow: hidden;
+}
+
+.ratio-bar i {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: var(--radius-pill);
+    background: currentColor;
+    transition: width 0.3s ease;
+}
+
+.host {
+    max-width: 152px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+}
+
+.hash {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.hash-text {
+    color: var(--text-2);
+}
+
+/* 复制按钮：默认隐形，悬停 / 聚焦时出现 */
+.copy-btn {
+    opacity: 0;
+}
+
+tr:hover .copy-btn,
+.cfg-row:hover .copy-btn,
+.copy-btn:focus-visible {
+    opacity: 1;
+}
+
+@media (hover: none) {
+    .copy-btn { opacity: 1; }
+}
+
+/* ---------- 分页 ---------- */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+}
+
+.page-total {
+    color: var(--text-3);
+    font-size: 12px;
+}
+
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.page-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.page-numbers {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.page-btn {
+    min-width: 28px;
+    height: 28px;
+    padding: 0 6px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-2);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.page-btn:hover {
+    background: var(--surface-3);
+    color: var(--text);
+}
+
+.page-btn.is-active {
+    background: var(--primary-bg);
+    border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+    color: var(--primary);
+    font-weight: 600;
+}
+
+.page-gap {
+    padding: 0 2px;
+    color: var(--text-3);
+}
+
+.jumper {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-3);
+    font-size: 12px;
+}
+
+@media (max-width: 768px) {
+    .pagination {
+        justify-content: center;
+    }
+
+    .search .input {
+        width: 100%;
+    }
+
+    .search {
+        flex: 1 1 180px;
+    }
+
+    .jumper {
+        display: none;
+    }
+}
