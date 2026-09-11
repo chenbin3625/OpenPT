@@ -509,7 +509,10 @@ async function copyText(text) {
 
     if (navigator.clipboard && window.isSecureContext) {
         try {
-            await navigator.clipboard.writeText(value);
+            await Promise.race([
+                navigator.clipboard.writeText(value),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('clipboard timeout')), 600)),
+            ]);
             return true;
         } catch {
             // 继续走兜底
@@ -551,7 +554,8 @@ function showToast(text, type = 'success') {
     toastHost.appendChild(el);
 
     // 入场动画结束后再计时，退场动画结束后移除节点
-    requestAnimationFrame(() => el.classList.add('is-in'));
+    el.getBoundingClientRect();
+    el.classList.add('is-in');
     setTimeout(() => {
         el.classList.remove('is-in');
         setTimeout(() => el.remove(), 200);
@@ -620,13 +624,10 @@ function openFor(anchor, build, title) {
     el.appendChild(build());
     el.style.visibility = 'hidden';
     el.classList.add('is-visible');
-    // 先渲染再测量，否则拿不到真实高度
-    requestAnimationFrame(() => {
-        if (currentAnchor !== anchor) return;
-        position(anchor);
-        el.style.visibility = '';
-    });
     currentAnchor = anchor;
+    // 先渲染再测量，否则拿不到真实高度
+    position(anchor);
+    if (currentAnchor === anchor) el.style.visibility = '';
 }
 
 /**
@@ -1310,7 +1311,8 @@ function createDrawer(opts) {
         document.body.appendChild(overlay);
         document.documentElement.classList.add('scroll-locked');
         document.addEventListener('keydown', onKeydown);
-        requestAnimationFrame(() => overlay.classList.add('is-open'));
+        overlay.getBoundingClientRect();
+        overlay.classList.add('is-open');
         closeBtn.focus({ preventScroll: true });
         opts.onOpen?.();
     }

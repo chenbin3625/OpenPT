@@ -149,6 +149,27 @@ go build -o openpt ./cmd/openpt
 > Note: `npm ci` installs nothing (the frontend has no dependencies) — it only exists so CI can cache and verify the
 > lockfile. Node 20+ is required for the build and dev scripts.
 
+### Web UI Regression Test
+
+`frontend/test/` holds a browser-level regression suite. It is also dependency-free: it drives the local
+Chrome/Chromium over the DevTools Protocol using only Node's standard library, against a built-in mock backend
+(a fixed set of 24 torrents, one SSE frame per second).
+
+```sh
+cd frontend
+npm run build      # preview mode asserts against the build output, so build first
+npm run test:ui
+```
+
+It runs the same assertions twice — once against the dev server (source as native ES modules) and once against the
+build output — and additionally collects uncaught exceptions, `console.error` calls and browser log errors. Assertions
+poll until they pass or time out, so there are no fixed sleeps to tune.
+
+- `npm run test:ui -- --dev` / `-- --preview` runs only one of the two paths
+- `CHROME_PATH=/path/to/chrome` points at a specific browser
+- Without a browser present the suite skips (exit code 0); pass `-- --require-browser` to make that a failure instead
+- Node 22+ is required here (it uses the global `WebSocket`), while the build and dev scripts still run on Node 20+
+
 ## Configuration
 
 OpenPT uses a TOML configuration file. It is recommended to copy it from the example file:
@@ -517,6 +538,25 @@ go build -o openpt ./cmd/openpt
 
 > 说明：前端没有任何依赖，`npm ci` 实际不安装任何包，保留 lockfile 只是为了让 CI 能缓存与校验。
 > 构建与开发脚本需要 Node 20+。
+
+### Web UI 回归测试
+
+`frontend/test/` 是浏览器层回归测试，同样零依赖：只用 Node 标准库经 DevTools Protocol 驱动本机
+Chrome/Chromium，配一个内置的 mock 后端（固定 24 个种子，每秒一帧 SSE）。
+
+```sh
+cd frontend
+npm run build      # preview 模式断言构建产物，需先构建
+npm run test:ui
+```
+
+同一套断言会跑两遍——一遍针对开发服务器（源码以原生 ES 模块提供），一遍针对构建产物；同时收集未捕获异常、
+`console.error` 与浏览器日志错误。断言都是轮询到通过或超时，没有需要调参的固定 sleep。
+
+- `npm run test:ui -- --dev` / `-- --preview` 只跑其中一条路径
+- `CHROME_PATH=/path/to/chrome` 指定浏览器可执行文件
+- 没有浏览器时默认跳过（退出码 0）；加 `-- --require-browser` 可让这种情况直接失败
+- 这里需要 Node 22+（用到全局 `WebSocket`），构建与开发脚本仍可在 Node 20+ 运行
 
 ## 配置方法
 

@@ -60,13 +60,10 @@ function openFor(anchor, build, title) {
     el.appendChild(build());
     el.style.visibility = 'hidden';
     el.classList.add('is-visible');
-    // 先渲染再测量，否则拿不到真实高度
-    requestAnimationFrame(() => {
-        if (currentAnchor !== anchor) return;
-        position(anchor);
-        el.style.visibility = '';
-    });
     currentAnchor = anchor;
+    // 先渲染再测量，否则拿不到真实高度
+    position(anchor);
+    if (currentAnchor === anchor) el.style.visibility = '';
 }
 
 /**

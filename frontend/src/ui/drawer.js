@@ -51,7 +51,8 @@ export function createDrawer(opts) {
         document.body.appendChild(overlay);
         document.documentElement.classList.add('scroll-locked');
         document.addEventListener('keydown', onKeydown);
-        requestAnimationFrame(() => overlay.classList.add('is-open'));
+        overlay.getBoundingClientRect();
+        overlay.classList.add('is-open');
         closeBtn.focus({ preventScroll: true });
         opts.onOpen?.();
     }

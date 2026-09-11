@@ -18,7 +18,8 @@ export function showToast(text, type = 'success') {
     toastHost.appendChild(el);
 
     // 入场动画结束后再计时，退场动画结束后移除节点
-    requestAnimationFrame(() => el.classList.add('is-in'));
+    el.getBoundingClientRect();
+    el.classList.add('is-in');
     setTimeout(() => {
         el.classList.remove('is-in');
         setTimeout(() => el.remove(), 200);

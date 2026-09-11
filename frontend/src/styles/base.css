@@ -39,6 +39,13 @@ code, .mono {
     font-size: 0.92em;
 }
 
+/* 浏览器默认的 [hidden] { display: none } 属于 UA 样式，会被下面任何
+   .empty / .pagination 这类作者级 display 规则盖掉，导致 el.hidden = true 失效。
+   统一在这里兜住，元素靠 hidden 属性隐藏时不必再关心自身 display。 */
+[hidden] {
+    display: none !important;
+}
+
 .icon {
     display: block;
     flex: 0 0 auto;

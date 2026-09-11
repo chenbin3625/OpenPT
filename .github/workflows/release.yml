@@ -46,6 +46,12 @@ jobs:
         run: npm run build
         working-directory: frontend
 
+      # 浏览器层回归。ubuntu-latest 自带 Chrome（/usr/bin/google-chrome），
+      # 不必额外安装。--require-browser 让"找不到浏览器"直接失败，而不是静默跳过。
+      - name: Web UI regression test
+        run: npm run test:ui -- --require-browser
+        working-directory: frontend
+
       # 打包为单个 tar 再上传，避免 upload/download-artifact 对目录的
       # 相对路径处理差异导致下游 go:embed 找不到 dist
       - name: Package dist

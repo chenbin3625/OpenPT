@@ -2,6 +2,23 @@
 
 本项目以 Git tag 发布版本。每次发布都会在 GitHub Release 中附上对应说明。
 
+## v0.3.1 - 2026-09-10
+
+本版修复 v0.3.0 引入的一个 Web UI 显示回归，并把浏览器层断言沉成仓库内的回归测试。
+后端、配置格式与 HTTP API 未改动，升级只需替换二进制或镜像。
+
+### 修复
+
+- **修复空状态提示与分页条在不该出现时仍然显示**：v0.3.0 中 `.empty`（"请将 .torrent 种子文件放入 torrents 目录"）会与正常的数据行同时出现；零结果时分页条仍占位；搜索框为空时清空按钮仍可见。三处都靠 `el.hidden = true` 隐藏，但浏览器的 `[hidden] { display: none }` 属于 UA 样式表，优先级低于 `.empty` / `.pagination` / `.input-clear` 自身的作者级 `display: flex` / `grid` 规则，于是 `hidden` 属性被静默盖掉。现在在 `base.css` 里统一声明 `[hidden] { display: none !important }`，元素靠 `hidden` 隐藏时不再需要关心自身 `display`
+
+### 测试
+
+- **新增 Web UI 浏览器回归测试**（`frontend/test/`，`npm run test:ui`）：零依赖实现，仅用 Node 标准库经 CDP 驱动本机 Chrome/Chromium，含确定性 mock 后端（固定 24 个种子、每秒一帧 SSE）。79 条断言覆盖渲染与数值格式化、顶栏指标、状态筛选、搜索防抖、三段排序循环、分页与跳转、配置抽屉分组、悬浮卡片内容与定位、tooltip、复制提示、主题切换与持久化，对**构建产物**与**开发服务器源码**两条路径各跑一遍，并收集未捕获异常、`console.error` 与浏览器日志错误
+- **可见性断言同时覆盖正反两个方向**，且判定 `getComputedStyle().display` 与实际尺寸而非只看 `hidden` 属性——上面这个回归正是因为原先只断言 DOM 内容与行数，`hidden` 确实为 `true`、文案也正确，纯 CSS 优先级导致的显示问题因此漏过
+- 接入 `release.yml` 的前端 job，每次 CI 都会执行（runner 自带 Chrome，无需额外安装）
+
+版本号 frontend/package.json -> 0.3.1
+
 ## v0.3.0 - 2026-09-10
 
 本版为 Web UI 全量重构：移除前端全部依赖并以原生实现重写，功能与配置保持不变。

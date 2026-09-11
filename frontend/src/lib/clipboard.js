@@ -6,7 +6,10 @@ export async function copyText(text) {
 
     if (navigator.clipboard && window.isSecureContext) {
         try {
-            await navigator.clipboard.writeText(value);
+            await Promise.race([
+                navigator.clipboard.writeText(value),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('clipboard timeout')), 600)),
+            ]);
             return true;
         } catch {
             // 继续走兜底
