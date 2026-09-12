@@ -72,6 +72,10 @@ function buildStatusDetail(t) {
         )),
     );
 
+    if (t.is_archived) {
+        box.appendChild(detailRow('文件位置', h('span', { class: 'tone-warning', text: '已归档至归档目录（持续重试中）' })));
+    }
+
     if (t.issue_reason) {
         box.appendChild(detailRow('异常原因', h('span', { class: 'tone-warning', text: t.issue_reason })));
     }

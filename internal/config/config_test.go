@@ -297,6 +297,45 @@ func TestJSONFormatDeprecated(t *testing.T) {
 	}
 }
 
+func TestArchiveRetriesConfig(t *testing.T) {
+	t.Run("default is 10", func(t *testing.T) {
+		cfg := loadConfigTOML(t, `client = "qbittorrent.client"`)
+		if cfg.ArchiveRetriesCount() != 10 {
+			t.Fatalf("ArchiveRetriesCount() = %d, want 10", cfg.ArchiveRetriesCount())
+		}
+	})
+
+	t.Run("explicit value", func(t *testing.T) {
+		cfg := loadConfigTOML(t, `
+client = "qbittorrent.client"
+archive_retries = 5
+`)
+		if cfg.ArchiveRetriesCount() != 5 {
+			t.Fatalf("ArchiveRetriesCount() = %d, want 5", cfg.ArchiveRetriesCount())
+		}
+	})
+
+	t.Run("disabled when zero", func(t *testing.T) {
+		cfg := loadConfigTOML(t, `
+client = "qbittorrent.client"
+archive_retries = 0
+`)
+		if cfg.ArchiveRetriesCount() != 0 {
+			t.Fatalf("ArchiveRetriesCount() = %d, want 0", cfg.ArchiveRetriesCount())
+		}
+	})
+
+	t.Run("negative fails", func(t *testing.T) {
+		path := writeConfigTOML(t, `
+client = "qbittorrent.client"
+archive_retries = -1
+`)
+		if _, err := Load(path); err == nil {
+			t.Fatal("expected negative archive_retries to fail")
+		}
+	})
+}
+
 func loadConfigTOML(t *testing.T, data string) Config {
 	t.Helper()
 	cfg, err := Load(writeConfigTOML(t, data))

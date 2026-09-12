@@ -19,6 +19,7 @@ import (
 type Config struct {
 	TorrentsDir                string         `toml:"torrents_dir"`
 	ArchiveDir                 string         `toml:"archive_dir"`
+	ArchiveRetries             *int           `toml:"archive_retries"`
 	ClientsDir                 string         `toml:"clients_dir"`
 	StateFile                  string         `toml:"state_file"`
 	Client                     string         `toml:"client"`
@@ -118,6 +119,10 @@ func (c *Config) applyDefaults(configPath string) {
 		c.ArchiveDir = filepath.Join(filepath.Dir(c.TorrentsDir), "torrents_archive")
 	} else {
 		c.ArchiveDir = resolveConfigPath(root, c.ArchiveDir)
+	}
+	if c.ArchiveRetries == nil {
+		defaultRetries := 10
+		c.ArchiveRetries = &defaultRetries
 	}
 	if c.ClientsDir == "" {
 		c.ClientsDir = filepath.Join(root, "clients")
@@ -219,6 +224,9 @@ func (c Config) Validate() error {
 	}
 	if err := validateArchiveDir(c.TorrentsDir, c.ArchiveDir); err != nil {
 		return err
+	}
+	if c.ArchiveRetries != nil && *c.ArchiveRetries < 0 {
+		return errors.New("archive_retries must not be negative")
 	}
 	if c.Announce.Port < 1 || c.Announce.Port > 65535 {
 		return errors.New("announce.port must be in 1..65535")
@@ -383,6 +391,13 @@ func (c Config) ScanInterval() time.Duration {
 
 func (c Config) ShutdownStopTimeout() time.Duration {
 	return time.Duration(c.ShutdownStopTimeoutSeconds) * time.Second
+}
+
+func (c Config) ArchiveRetriesCount() int {
+	if c.ArchiveRetries == nil {
+		return 10
+	}
+	return *c.ArchiveRetries
 }
 
 // validateArchiveDir 确保 archive_dir 不与 torrents_dir 相同或位于其内部，

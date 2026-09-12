@@ -61,6 +61,9 @@ type Store struct {
 	// loadedMeta 记录每个路径成功加载时的文件大小与修改时间，
 	// 供周期扫描短路跳过未变化的文件，避免每个周期全量重新解析与哈希。
 	loadedMeta map[string]fileMeta
+	// failedMeta 记录加载失败（如损坏的种子）的文件大小与修改时间，
+	// 避免周期扫描在每个周期对损坏文件反复重新解析与警告刷屏。
+	failedMeta map[string]fileMeta
 	events     chan Event
 	debounceMu sync.Mutex
 	// pendingLoads/nextLoadID 用于 watcher 事件的防抖，避免并发加载同一路径。
@@ -87,6 +90,7 @@ func NewWithScanInterval(ctx context.Context, torrentsDir, archiveDir string, sc
 		log:          log,
 		byPath:       map[string]*torrent.Torrent{},
 		loadedMeta:   map[string]fileMeta{},
+		failedMeta:   map[string]fileMeta{},
 		events:       make(chan Event, eventBufferSize), // 增加缓冲区避免阻塞
 		pendingLoads: map[string]uint64{},
 	}
@@ -146,6 +150,12 @@ func (s *Store) Start(ctx context.Context) error {
 		_ = w.Close()
 		return err
 	}
+	if s.archiveDir != "" && s.archiveDir != s.torrentsDir {
+		_ = os.MkdirAll(s.archiveDir, 0o755)
+		if err := w.Add(s.archiveDir); err != nil {
+			s.log.Warn("failed to watch archive dir", "dir", s.archiveDir, "error", err)
+		}
+	}
 	go func() {
 		defer w.Close()
 		for {
@@ -184,31 +194,44 @@ func (s *Store) scan() error {
 	return s.scanDir(false)
 }
 
+func (s *Store) ScanAndNotify() error {
+	return s.scanDir(true)
+}
+
 func (s *Store) scanAndNotify() error {
 	return s.scanDir(true)
 }
 
 func (s *Store) scanDir(notify bool) error {
-	entries, err := os.ReadDir(s.torrentsDir)
-	if err != nil {
-		return err
+	dirs := []string{s.torrentsDir}
+	if s.archiveDir != "" && s.archiveDir != s.torrentsDir {
+		dirs = append(dirs, s.archiveDir)
 	}
-	seen := make(map[string]bool, len(entries))
-	for _, e := range entries {
-		if e.IsDir() || !torrent.IsTorrentPath(e.Name()) {
-			continue
+	seen := make(map[string]bool)
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if dir == s.archiveDir && os.IsNotExist(err) {
+				continue
+			}
+			return err
 		}
-		path := filepath.Join(s.torrentsDir, e.Name())
-		seen[path] = true
-		// 周期扫描是 fsnotify 的兜底路径：文件指纹未变时跳过重新解析，
-		// 避免每个扫描周期对全部种子做完整 bencode 解析与 info 哈希。
-		if s.hasUnchangedMeta(path) {
-			continue
-		}
-		if notify {
-			s.loadFile(path)
-		} else {
-			s.loadFileQuiet(path)
+		for _, e := range entries {
+			if e.IsDir() || !torrent.IsTorrentPath(e.Name()) {
+				continue
+			}
+			path := filepath.Join(dir, e.Name())
+			seen[path] = true
+			// 周期扫描是 fsnotify 的兜底路径：文件指纹未变时跳过重新解析，
+			// 避免每个扫描周期对全部种子做完整 bencode 解析与 info 哈希。
+			if s.hasUnchangedMeta(path) {
+				continue
+			}
+			if notify {
+				s.loadFile(path)
+			} else {
+				s.loadFileQuiet(path)
+			}
 		}
 	}
 	var missing []string
@@ -257,6 +280,7 @@ func (s *Store) loadFileQuiet(path string) {
 	if meta != nil {
 		s.loadedMeta[path] = *meta
 	}
+	delete(s.failedMeta, path)
 	s.mu.Unlock()
 	s.log.Info("torrent loaded", "path", path, "name", t.Name, "size", t.Size, "info_hash", t.InfoHashHex())
 }
@@ -274,6 +298,7 @@ func (s *Store) loadFile(path string) {
 	if meta != nil {
 		s.loadedMeta[path] = *meta
 	}
+	delete(s.failedMeta, path)
 	s.mu.Unlock()
 	if old != nil && old.InfoHash == t.InfoHash && slices.Equal(old.AnnounceList, t.AnnounceList) {
 		return
@@ -358,6 +383,12 @@ func (s *Store) handleLoadFailure(path string, loadErr error) {
 	}
 	if s.archiveDir == "" {
 		s.log.Warn("torrent load failed, skipping", "path", path, "reason", loadErr)
+		s.recordFailedMeta(path)
+		return
+	}
+	if s.isPathInArchiveDir(path) {
+		s.log.Warn("archived torrent load failed, skipping", "path", path, "reason", loadErr)
+		s.recordFailedMeta(path)
 		return
 	}
 	if s.isRecentlyModified(path) {
@@ -367,13 +398,23 @@ func (s *Store) handleLoadFailure(path string, loadErr error) {
 	dest, ok := s.archiveFile(path)
 	if !ok {
 		s.log.Warn("torrent load failed, kept in place (archive failed)", "path", path, "reason", loadErr)
+		s.recordFailedMeta(path)
 		return
 	}
 	s.log.Warn("torrent load failed, archived", "path", path, "archive", dest, "reason", loadErr)
+	s.recordFailedMeta(dest)
 	// 文件已移走：移除旧条目并通知调度器停止
 	if old, notify := s.removeTorrentEntry(path); notify {
 		s.log.Info("torrent removed", "path", path, "info_hash", old.InfoHashHex())
 		s.emit(Event{Type: Removed, Torrent: old}, path)
+	}
+}
+
+func (s *Store) recordFailedMeta(path string) {
+	if meta := s.statFileMeta(path); meta != nil {
+		s.mu.Lock()
+		s.failedMeta[path] = *meta
+		s.mu.Unlock()
 	}
 }
 
@@ -458,6 +499,148 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
+func copyOrLinkFile(src, dst string) error {
+	if err := os.Link(src, dst); err == nil {
+		return nil
+	}
+	return copyFile(src, dst)
+}
+
+func (s *Store) transferTorrentFile(oldPath, newPath string, t *torrent.Torrent) error {
+	if err := copyOrLinkFile(oldPath, newPath); err != nil {
+		return err
+	}
+
+	s.debounceMu.Lock()
+	delete(s.pendingLoads, oldPath)
+	delete(s.pendingLoads, newPath)
+	s.debounceMu.Unlock()
+
+	s.mu.Lock()
+	s.byPath[newPath] = t
+	t.SetPath(newPath)
+	if meta := s.statFileMeta(newPath); meta != nil {
+		s.loadedMeta[newPath] = *meta
+	}
+	delete(s.failedMeta, newPath)
+	s.mu.Unlock()
+
+	if err := os.Remove(oldPath); err != nil {
+		// 删除旧文件失败时回滚 newPath，避免两处同时残留
+		s.mu.Lock()
+		delete(s.byPath, newPath)
+		delete(s.loadedMeta, newPath)
+		t.SetPath(oldPath)
+		s.byPath[oldPath] = t
+		s.mu.Unlock()
+		_ = os.Remove(newPath)
+		return err
+	}
+
+	s.mu.Lock()
+	delete(s.byPath, oldPath)
+	delete(s.loadedMeta, oldPath)
+	delete(s.failedMeta, oldPath)
+	s.mu.Unlock()
+
+	return nil
+}
+
+// ArchiveTorrent 将异常种子移动到归档目录，并更新 Store 的路径映射。
+// 移动过程中调度器不会收到 Removed 事件，继续保持重试。
+func (s *Store) ArchiveTorrent(t *torrent.Torrent) (string, error) {
+	if t == nil {
+		return "", errors.New("nil torrent")
+	}
+	if s.archiveDir == "" {
+		return "", errors.New("archive_dir not configured")
+	}
+	oldPath := t.GetPath()
+
+	if s.isPathInArchiveDir(oldPath) {
+		return oldPath, nil
+	}
+	if err := os.MkdirAll(s.archiveDir, 0o755); err != nil {
+		return "", err
+	}
+
+	dest := uniquePath(s.archiveDir, filepath.Base(oldPath))
+	if err := s.transferTorrentFile(oldPath, dest, t); err != nil {
+		s.log.Warn("failed to archive torrent", "name", t.Name, "path", oldPath, "dest", dest, "error", err)
+		return "", err
+	}
+	s.log.Warn("abnormal torrent archived; retry continuing", "name", t.Name, "old_path", oldPath, "archive", dest)
+	return dest, nil
+}
+
+// RestoreTorrent 将已恢复正常的种子从归档目录移回种子目录。
+func (s *Store) RestoreTorrent(t *torrent.Torrent) (string, error) {
+	if t == nil {
+		return "", errors.New("nil torrent")
+	}
+	if s.torrentsDir == "" {
+		return "", errors.New("torrents_dir not configured")
+	}
+	oldPath := t.GetPath()
+
+	if !s.isPathInArchiveDir(oldPath) {
+		return oldPath, nil
+	}
+	if err := os.MkdirAll(s.torrentsDir, 0o755); err != nil {
+		return "", err
+	}
+
+	dest := uniquePath(s.torrentsDir, filepath.Base(oldPath))
+	if err := s.transferTorrentFile(oldPath, dest, t); err != nil {
+		s.log.Warn("failed to restore torrent", "name", t.Name, "path", oldPath, "dest", dest, "error", err)
+		return "", err
+	}
+	s.log.Info("recovered torrent restored to torrents dir", "name", t.Name, "old_path", oldPath, "new_path", dest)
+	return dest, nil
+}
+
+func isSubPath(parent, path string) bool {
+	if parent == "" || path == "" {
+		return false
+	}
+	pAbs, err := filepath.Abs(filepath.Clean(parent))
+	if err != nil {
+		pAbs = parent
+	}
+	cAbs, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		cAbs = path
+	}
+	rel, err := filepath.Rel(pAbs, cAbs)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func (s *Store) isPathInArchiveDir(path string) bool {
+	return isSubPath(s.archiveDir, path)
+}
+
+func (s *Store) isPathInTorrentsDir(path string) bool {
+	return isSubPath(s.torrentsDir, path)
+}
+
+func (s *Store) IsArchived(t *torrent.Torrent) bool {
+	if t == nil {
+		return false
+	}
+	return s.isPathInArchiveDir(t.GetPath())
+}
+
+func (s *Store) ArchiveDir() string {
+	return s.archiveDir
+}
+
+func (s *Store) TorrentsDir() string {
+	return s.torrentsDir
+}
+
 // hasOtherPathWithInfoHash 报告除 excludePath 外是否还有其它已加载条目持有同一 infohash。
 func (s *Store) hasOtherPathWithInfoHash(excludePath string, hash [20]byte) bool {
 	s.mu.RLock()
@@ -479,8 +662,13 @@ func (s *Store) hasUnchangedMeta(path string) bool {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	meta, ok := s.loadedMeta[path]
-	return ok && meta.size == info.Size() && meta.modTime.Equal(info.ModTime())
+	if meta, ok := s.loadedMeta[path]; ok && meta.size == info.Size() && meta.modTime.Equal(info.ModTime()) {
+		return true
+	}
+	if meta, ok := s.failedMeta[path]; ok && meta.size == info.Size() && meta.modTime.Equal(info.ModTime()) {
+		return true
+	}
+	return false
 }
 
 // statFileMeta 在加载成功后调用，取当前文件指纹；文件已被移走时返回 nil。
@@ -501,6 +689,7 @@ func (s *Store) removeTorrentEntry(path string) (*torrent.Torrent, bool) {
 	t := s.byPath[path]
 	delete(s.byPath, path)
 	delete(s.loadedMeta, path)
+	delete(s.failedMeta, path)
 	if t == nil {
 		s.mu.Unlock()
 		return nil, false

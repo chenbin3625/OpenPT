@@ -7,18 +7,32 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/anacrolix/torrent/metainfo"
 	infohashv2 "github.com/anacrolix/torrent/types/infohash-v2"
 )
 
 type Torrent struct {
+	mu           sync.RWMutex
 	Path         string
 	Name         string
 	Size         int64
 	Announce     string
 	AnnounceList []string
 	InfoHash     [20]byte
+}
+
+func (t *Torrent) GetPath() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.Path
+}
+
+func (t *Torrent) SetPath(p string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.Path = p
 }
 
 func Load(path string) (*Torrent, error) {
@@ -59,13 +73,13 @@ func Load(path string) (*Torrent, error) {
 	}, nil
 }
 
-func (t Torrent) InfoHashBytes() []byte {
+func (t *Torrent) InfoHashBytes() []byte {
 	out := make([]byte, len(t.InfoHash))
 	copy(out, t.InfoHash[:])
 	return out
 }
 
-func (t Torrent) InfoHashHex() string {
+func (t *Torrent) InfoHashHex() string {
 	return hex.EncodeToString(t.InfoHash[:])
 }
 

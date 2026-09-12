@@ -151,6 +151,7 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 	items := []ConfigItem{
 		{Key: "torrents_dir", Label: "种子目录", Value: cfg.TorrentsDir},
 		{Key: "archive_dir", Label: "归档目录", Value: cfg.ArchiveDir},
+		{Key: "archive_retries", Label: "异常归档重试次数", Value: formatArchiveRetries(cfg.ArchiveRetriesCount())},
 		{Key: "clients_dir", Label: "客户端配置目录", Value: cfg.ClientsDir},
 		{Key: "state_file", Label: "状态文件", Value: cfg.StateFile},
 		{Key: "client", Label: "客户端伪装", Value: cfg.Client},
@@ -242,6 +243,13 @@ func formatRatioTarget(ratio float64) string {
 		return "禁用"
 	}
 	return fmt.Sprintf("%.2f", ratio)
+}
+
+func formatArchiveRetries(n int) string {
+	if n <= 0 {
+		return "禁用（0）"
+	}
+	return fmt.Sprintf("%d 次", n)
 }
 
 func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {

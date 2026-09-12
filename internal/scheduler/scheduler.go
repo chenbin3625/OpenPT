@@ -83,6 +83,7 @@ type TorrentStatus struct {
 	// HasResponse 表示是否已收到过至少一次成功的 tracker 响应。
 	// 尚未首次上报成功的种子不应被标记为“无 peers”等异常（详见 Status）。
 	HasResponse bool `json:"has_response"`
+	IsArchived  bool `json:"is_archived,omitempty"`
 }
 
 func NextAfter(event clientemu.Event, interval time.Duration, err error) Result {
@@ -501,6 +502,7 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 			a.nextEvent = event
 			a.mu.Unlock()
 			s.log.Warn("announce failed", "event", eventName(event), "name", a.torrent.Name, "failures", failures, "retry_in", delay, "error", err)
+			s.checkArchiveFailure(a, failures)
 			timer.Reset(delay)
 			continue
 		} else {
@@ -515,6 +517,7 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 			a.lastError = ""
 			a.lastAnnounce = now
 			a.mu.Unlock()
+			s.checkRestoreSuccess(a)
 			// 遵守 tracker 的 min interval：取 interval 与 min interval 的较大值。
 			// 随后钳制到 [minAnnounceIntervalSeconds, maxAnnounceIntervalSeconds]：
 			// 下限防止响应缺失 interval（为 0）时沿用初始 5s 间隔无限高频上报、
@@ -560,6 +563,36 @@ func (s *Scheduler) loop(ctx context.Context, a *announcer, event clientemu.Even
 		a.nextEvent = event
 		a.mu.Unlock()
 		timer.Reset(interval)
+	}
+}
+
+func (s *Scheduler) checkArchiveFailure(a *announcer, failures int) {
+	cfg := s.config()
+	retries := cfg.ArchiveRetriesCount()
+	if retries <= 0 || failures < retries || s.store == nil {
+		return
+	}
+	if s.store.IsArchived(a.torrent) {
+		return
+	}
+	if dest, err := s.store.ArchiveTorrent(a.torrent); err != nil {
+		s.log.Warn("failed to auto-archive abnormal torrent", "name", a.torrent.Name, "error", err)
+	} else {
+		s.log.Warn("torrent announce failed repeatedly, auto-archived; retry continuing", "name", a.torrent.Name, "failures", failures, "archive", dest)
+	}
+}
+
+func (s *Scheduler) checkRestoreSuccess(a *announcer) {
+	if s.store == nil {
+		return
+	}
+	if !s.store.IsArchived(a.torrent) {
+		return
+	}
+	if dest, err := s.store.RestoreTorrent(a.torrent); err != nil {
+		s.log.Warn("failed to auto-restore recovered torrent", "name", a.torrent.Name, "error", err)
+	} else {
+		s.log.Info("recovered torrent auto-restored to torrents dir", "name", a.torrent.Name, "path", dest)
 	}
 }
 
@@ -943,6 +976,11 @@ func (s *Scheduler) Status() []TorrentStatus {
 			issueReason = strings.Join(issueReasons, "; ")
 		}
 
+		isArchived := false
+		if s.store != nil {
+			isArchived = s.store.IsArchived(a.torrent)
+		}
+
 		out = append(out, TorrentStatus{
 			InfoHash:        infoHashHex,
 			Name:            a.torrent.Name,
@@ -965,6 +1003,7 @@ func (s *Scheduler) Status() []TorrentStatus {
 			RetryInSec:      secondsUntil(nextAnnounce),
 			NextEvent:       eventName(nextEvent),
 			HasResponse:     hasResponse,
+			IsArchived:      isArchived,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

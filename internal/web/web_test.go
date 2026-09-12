@@ -66,6 +66,9 @@ func TestHandleConfigUsesCurrentSchedulerConfig(t *testing.T) {
 	if items["archive_dir"] != "/new/archive" {
 		t.Fatalf("archive_dir item = %q, want /new/archive", items["archive_dir"])
 	}
+	if items["archive_retries"] != "10 次" {
+		t.Fatalf("archive_retries item = %q, want 10 次", items["archive_retries"])
+	}
 	if items["scan_interval_seconds"] != "11 秒" {
 		t.Fatalf("scan_interval item = %q, want 11 秒", items["scan_interval_seconds"])
 	}

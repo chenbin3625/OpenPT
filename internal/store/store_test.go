@@ -586,3 +586,197 @@ func ageFile(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 }
+
+func TestArchiveTorrentAndKeepRunning(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	baseDir := t.TempDir()
+	torrentsDir := filepath.Join(baseDir, "torrents")
+	archiveDir := filepath.Join(baseDir, "archive")
+	if err := os.MkdirAll(torrentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewWithScanInterval(ctx, torrentsDir, archiveDir, 0, discardLogger())
+	torrentPath := filepath.Join(torrentsDir, "test.torrent")
+	writeTestTorrent(t, torrentPath, "http://tracker.example/announce", "test.bin", 100)
+
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	ev := receiveEvent(t, s)
+	if ev.Type != Added {
+		t.Fatalf("expected Added, got %v", ev.Type)
+	}
+	tor := ev.Torrent
+
+	if s.IsArchived(tor) {
+		t.Fatal("expected torrent not to be archived initially")
+	}
+
+	// 执行归档
+	newPath, err := s.ArchiveTorrent(tor)
+	if err != nil {
+		t.Fatalf("ArchiveTorrent failed: %v", err)
+	}
+	if !s.IsArchived(tor) {
+		t.Fatal("expected torrent to be archived after ArchiveTorrent")
+	}
+	if _, err := os.Stat(torrentPath); !os.IsNotExist(err) {
+		t.Fatalf("expected original file removed, got err: %v", err)
+	}
+	if _, err := os.Stat(newPath); err != nil {
+		t.Fatalf("expected file in archive dir, got err: %v", err)
+	}
+
+	// 验证在周期扫描时，归档的种子不会触发 Removed 事件，状态仍然存在
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ev := <-s.Events():
+		t.Fatalf("unexpected event after archive and scan: %+v", ev)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if len(s.Status()) != 1 {
+		t.Fatalf("expected 1 torrent in store status, got %d", len(s.Status()))
+	}
+}
+
+func TestDeleteFromArchiveEmitsRemoved(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	baseDir := t.TempDir()
+	torrentsDir := filepath.Join(baseDir, "torrents")
+	archiveDir := filepath.Join(baseDir, "archive")
+	_ = os.MkdirAll(torrentsDir, 0o755)
+	_ = os.MkdirAll(archiveDir, 0o755)
+
+	s := NewWithScanInterval(ctx, torrentsDir, archiveDir, 0, discardLogger())
+	torrentPath := filepath.Join(torrentsDir, "test.torrent")
+	writeTestTorrent(t, torrentPath, "http://tracker.example/announce", "test.bin", 100)
+	_ = s.scanAndNotify()
+	ev := receiveEvent(t, s)
+	tor := ev.Torrent
+
+	newPath, err := s.ArchiveTorrent(tor)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 用户从归档目录删除文件
+	if err := os.Remove(newPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// 再次扫描，应产生 Removed 事件
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	removed := receiveEvent(t, s)
+	if removed.Type != Removed {
+		t.Fatalf("expected Removed, got %v", removed.Type)
+	}
+	if len(s.Status()) != 0 {
+		t.Fatalf("expected empty status, got %d", len(s.Status()))
+	}
+}
+
+func TestRestoreTorrent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	baseDir := t.TempDir()
+	torrentsDir := filepath.Join(baseDir, "torrents")
+	archiveDir := filepath.Join(baseDir, "archive")
+	_ = os.MkdirAll(torrentsDir, 0o755)
+	_ = os.MkdirAll(archiveDir, 0o755)
+
+	s := NewWithScanInterval(ctx, torrentsDir, archiveDir, 0, discardLogger())
+	torrentPath := filepath.Join(torrentsDir, "test.torrent")
+	writeTestTorrent(t, torrentPath, "http://tracker.example/announce", "test.bin", 100)
+	_ = s.scanAndNotify()
+	ev := receiveEvent(t, s)
+	tor := ev.Torrent
+
+	_, err := s.ArchiveTorrent(tor)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	restoredPath, err := s.RestoreTorrent(tor)
+	if err != nil {
+		t.Fatalf("RestoreTorrent failed: %v", err)
+	}
+	if s.IsArchived(tor) {
+		t.Fatal("expected torrent not to be archived after RestoreTorrent")
+	}
+	if _, err := os.Stat(restoredPath); err != nil {
+		t.Fatalf("restored file not found: %v", err)
+	}
+
+	_ = s.scanAndNotify()
+	select {
+	case ev := <-s.Events():
+		t.Fatalf("unexpected event after restore and scan: %+v", ev)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestScanLoadsArchivedTorrentOnStartup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	baseDir := t.TempDir()
+	torrentsDir := filepath.Join(baseDir, "torrents")
+	archiveDir := filepath.Join(baseDir, "archive")
+	_ = os.MkdirAll(torrentsDir, 0o755)
+	_ = os.MkdirAll(archiveDir, 0o755)
+
+	// 在归档目录已有一个有效种子文件
+	archivedTorrent := filepath.Join(archiveDir, "archived.torrent")
+	writeTestTorrent(t, archivedTorrent, "http://tracker.example/announce", "archived.bin", 200)
+
+	s := NewWithScanInterval(ctx, torrentsDir, archiveDir, 0, discardLogger())
+	if err := s.scanAndNotify(); err != nil {
+		t.Fatal(err)
+	}
+	ev := receiveEvent(t, s)
+	if ev.Type != Added || ev.Torrent.Name != "archived.bin" {
+		t.Fatalf("expected Added archived.bin, got %+v", ev)
+	}
+	if !s.IsArchived(ev.Torrent) {
+		t.Fatal("expected IsArchived to be true")
+	}
+}
+
+func TestScanSkipsCorruptFileInArchiveDir(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	baseDir := t.TempDir()
+	torrentsDir := filepath.Join(baseDir, "torrents")
+	archiveDir := filepath.Join(baseDir, "archive")
+	_ = os.MkdirAll(torrentsDir, 0o755)
+	_ = os.MkdirAll(archiveDir, 0o755)
+
+	// 归档目录中损坏的文件
+	brokenPath := filepath.Join(archiveDir, "broken.torrent")
+	if err := os.WriteFile(brokenPath, []byte("invalid data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewWithScanInterval(ctx, torrentsDir, archiveDir, 0, discardLogger())
+	// 扫描多次，验证不会重归档、不发事件、不会崩溃
+	for i := 0; i < 3; i++ {
+		if err := s.scanAndNotify(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	select {
+	case ev := <-s.Events():
+		t.Fatalf("unexpected event for broken archive file: %+v", ev)
+	case <-time.After(50 * time.Millisecond):
+	}
+}

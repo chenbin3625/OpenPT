@@ -12,7 +12,7 @@ const CONFIG_GROUPS = [
     },
     {
         title: '目录与状态持久化', icon: 'folder',
-        keys: ['torrents_dir', 'archive_dir', 'clients_dir', 'state_file', 'logging.file'],
+        keys: ['torrents_dir', 'archive_dir', 'archive_retries', 'clients_dir', 'state_file', 'logging.file'],
     },
     {
         title: '上传速率与策略', icon: 'uploaded',

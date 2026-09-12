@@ -22,9 +22,15 @@ client = "qbittorrent-5.1.4.client"
 torrents_dir = "./torrents"
 
 # 归档目录
-# 加载失败（损坏/无法解析）的种子会被移动到这里，便于整理问题种子，不会被删除。
+# 加载失败（损坏/无法解析）以及连续汇报失败超限的异常种子会被移动到这里，便于整理问题种子。
 # 留空则使用默认值 torrents_dir 的同级 torrents_archive 目录。
 archive_dir = "./torrents_archive"
+
+# 异常种子归档重试次数
+# 当种子汇报连续失败（重试）达到或超过此次数时，自动将 .torrent 文件移动到 archive_dir 归档目录中。
+# 移动后 OpenPT 仍会继续重试汇报；若从归档目录中删除该种子文件，则自动停止保种。
+# 设为 0 表示禁用异常种子自动归档。默认值为 10。
+archive_retries = 10
 
 # 客户端配置文件目录
 # 存放 BitTorrent 客户端模拟配置文件（.client 文件）

@@ -234,7 +234,9 @@ file = ""
 
 `clients_dir`: the client spoofing configuration directory.
 
-`archive_dir`: the archive directory for problematic torrents. Corrupted or unparsable `.torrent` files are moved here once the write is confirmed complete; files with the same name are not overwritten.
+`archive_dir`: the archive directory for problematic torrents. Corrupted or unparsable `.torrent` files and abnormal torrents with excessive announce failures are moved here; files with the same name are not overwritten.
+
+`archive_retries`: consecutive failure (retry) threshold before automatically archiving abnormal torrents into `archive_dir`. The scheduler continues retrying tracker announces while archived; deleting the `.torrent` file from the archive directory stops seeding; when announce succeeds, the file is restored back to the torrents directory. Set to `0` to disable. Defaults to `10`.
 
 `state_file`: the state persistence file, which stores accumulated upload and the status of torrents that have reached the target share ratio.
 
@@ -622,7 +624,9 @@ file = ""
 
 `clients_dir`：客户端伪装配置目录。
 
-`archive_dir`：问题种子归档目录。损坏或无法解析的 `.torrent` 文件会在确认写入完成后移动到这里；同名文件不会被覆盖。
+`archive_dir`：问题种子归档目录。损坏或无法解析的 `.torrent` 文件，以及连续重试失败超过阈值的异常种子会被移动到这里；同名文件不会被覆盖。
+
+`archive_retries`：异常种子自动归档的连续重试失败阈值。超过该次数的种子会自动移动到 `archive_dir` 中，调度器会继续重试汇报；若用户直接从归档目录删除文件则自动停止保种并清理状态；汇报成功后会自动移回种子目录。设为 `0` 表示禁用自动归档。默认值为 `10`。
 
 `state_file`：状态持久化文件，保存累计上传量和已达到目标分享率的种子状态。
 

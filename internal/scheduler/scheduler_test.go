@@ -696,3 +696,181 @@ func waitUntil(t *testing.T, ok func() bool) {
 	}
 	t.Fatal("condition was not met before timeout")
 }
+
+func TestScheduler_ArchiveOnFailureAndRestore(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	baseDir := t.TempDir()
+	torrentsDir := filepath.Join(baseDir, "torrents")
+	archiveDir := filepath.Join(baseDir, "archive")
+	_ = os.MkdirAll(torrentsDir, 0o755)
+	_ = os.MkdirAll(archiveDir, 0o755)
+
+	shouldFail := true
+	var serverMu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serverMu.Lock()
+		defer serverMu.Unlock()
+		if shouldFail {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		// 恢复正常响应
+		resp := "d8:intervali60e5:peers0:e"
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(resp))
+	}))
+	defer srv.Close()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st := store.New(ctx, torrentsDir, archiveDir, log)
+	if err := st.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	torrentPath := filepath.Join(torrentsDir, "test.torrent")
+	writeTestTorrent(t, torrentPath, srv.URL, "archive_test.bin", 1024)
+
+	tc, err := tracker.New(tracker.Options{Timeout: time.Second, ReuseConnections: true, MaxIdleConns: 10, MaxIdleConnsPerHost: 10, IdleConnTimeout: time.Second}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emu, err := newTestClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bw := bandwidth.New(bandwidth.Config{})
+
+	retries := 2
+	cfg := config.Config{
+		TorrentsDir:      torrentsDir,
+		ArchiveDir:       archiveDir,
+		ArchiveRetries:   &retries,
+		SimultaneousSeed: 1,
+		Announce:         config.AnnounceConfig{Port: 6881},
+		Tracker:          config.TrackerConfig{FailureBackoffMinSeconds: 1, FailureBackoffMaxSeconds: 1},
+		Uploaded:         config.UploadedConfig{Strategy: "none"},
+	}
+
+	s := New(cfg, emu, tc, bw, st, log)
+	s.Start(ctx)
+	defer s.Stop(ctx)
+
+	// 等待连续失败达到 2 次并归档
+	waitUntil(t, func() bool {
+		st := s.Status()
+		if len(st) == 0 {
+			return false
+		}
+		return st[0].Failures >= 2 && st[0].IsArchived
+	})
+
+	// 确认文件已移至 archiveDir
+	if _, err := os.Stat(torrentPath); !os.IsNotExist(err) {
+		t.Fatalf("expected original torrent file to be gone from torrentsDir, err: %v", err)
+	}
+	archivedFiles, err := os.ReadDir(archiveDir)
+	if err != nil || len(archivedFiles) != 1 {
+		t.Fatalf("expected 1 file in archiveDir, got %v (err: %v)", archivedFiles, err)
+	}
+
+	// 确认调度器仍处于活跃状态
+	if s.ActiveCount() != 1 {
+		t.Fatalf("active count = %d, want 1 (should keep retrying)", s.ActiveCount())
+	}
+
+	// 切换为正常成功上报
+	serverMu.Lock()
+	shouldFail = false
+	serverMu.Unlock()
+
+	// 等待下一次上报成功并移回 torrentsDir
+	waitUntil(t, func() bool {
+		st := s.Status()
+		if len(st) == 0 {
+			return false
+		}
+		return !st[0].IsArchived && st[0].Failures == 0
+	})
+
+	// 确认文件已恢复到 torrentsDir
+	if _, err := os.Stat(torrentPath); err != nil {
+		t.Fatalf("expected restored torrent file in torrentsDir, err: %v", err)
+	}
+}
+
+func TestScheduler_DeleteArchivedTorrentStops(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	baseDir := t.TempDir()
+	torrentsDir := filepath.Join(baseDir, "torrents")
+	archiveDir := filepath.Join(baseDir, "archive")
+	_ = os.MkdirAll(torrentsDir, 0o755)
+	_ = os.MkdirAll(archiveDir, 0o755)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st := store.New(ctx, torrentsDir, archiveDir, log)
+	if err := st.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	torrentPath := filepath.Join(torrentsDir, "test.torrent")
+	writeTestTorrent(t, torrentPath, srv.URL, "del_archive.bin", 1024)
+
+	tc, err := tracker.New(tracker.Options{Timeout: time.Second, ReuseConnections: true, MaxIdleConns: 10, MaxIdleConnsPerHost: 10, IdleConnTimeout: time.Second}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emu, err := newTestClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bw := bandwidth.New(bandwidth.Config{})
+
+	retries := 1
+	cfg := config.Config{
+		TorrentsDir:      torrentsDir,
+		ArchiveDir:       archiveDir,
+		ArchiveRetries:   &retries,
+		SimultaneousSeed: 1,
+		Announce:         config.AnnounceConfig{Port: 6881},
+		Tracker:          config.TrackerConfig{FailureBackoffMinSeconds: 1, FailureBackoffMaxSeconds: 1},
+		Uploaded:         config.UploadedConfig{Strategy: "none"},
+	}
+
+	s := New(cfg, emu, tc, bw, st, log)
+	s.Start(ctx)
+	defer s.Stop(ctx)
+
+	// 等待失败 1 次并归档
+	waitUntil(t, func() bool {
+		st := s.Status()
+		return len(st) == 1 && st[0].IsArchived
+	})
+
+	archivedFiles, err := os.ReadDir(archiveDir)
+	if err != nil || len(archivedFiles) != 1 {
+		t.Fatalf("expected 1 file in archiveDir, got %v", archivedFiles)
+	}
+
+	// 用户删除归档目录中的文件
+	archivedPath := filepath.Join(archiveDir, archivedFiles[0].Name())
+	if err := os.Remove(archivedPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// 触发扫描
+	_ = st.ScanAndNotify()
+
+	// 等待调度器停止该种子
+	waitUntil(t, func() bool {
+		return s.ActiveCount() == 0 && len(s.Status()) == 0
+	})
+}
